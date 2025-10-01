@@ -1,14 +1,15 @@
 // Application constants
 export const APP_CONFIG = {
-    NAME: 'AuthJet',
-    VERSION: '1.0.0',
-    DESCRIPTION: 'JWT Authentication as a Service',
-  };
-  
-  // API endpoints
-  export const API_ENDPOINTS = {
-    AUTH: {
-      LOGIN: '/api/auth/login',
+  NAME: 'AuthJet',
+  VERSION: '1.0.0',
+  DESCRIPTION: 'JWT Authentication as a Service',
+  // Default client ID for the AuthJet Development client (from seeds.sql)
+  DEFAULT_CLIENT_ID: process.env.REACT_APP_CLIENT_ID || 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+};
+
+// API endpoints
+export const API_ENDPOINTS = {
+  AUTH: {
       REGISTER: '/api/auth/register',
       LOGOUT: '/api/auth/logout',
       REFRESH: '/api/auth/refresh',

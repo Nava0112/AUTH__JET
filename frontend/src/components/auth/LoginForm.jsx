@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import OAuthButtons from './OAuthButtons';
 import Loading from '../common/Loading';
@@ -105,6 +106,18 @@ const LoginForm = () => {
               >
                 {isLoading ? 'Signing in...' : 'Sign in'}
               </button>
+            </div>
+
+            <div className="text-center">
+              <p className="text-sm text-gray-600">
+                Don't have an account?{' '}
+                <Link
+                  to="/signup"
+                  className="font-medium text-indigo-600 hover:text-indigo-500"
+                >
+                  Sign up
+                </Link>
+              </p>
             </div>
           </form>
         </div>

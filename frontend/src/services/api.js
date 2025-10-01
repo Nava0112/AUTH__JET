@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { authService } from './auth';
+import { APP_CONFIG } from '../utils/constants';
 
 // Create axios instance
 const api = axios.create({
@@ -79,12 +80,20 @@ const apiServiceObj = {
   // Auth endpoints
   auth: {
     login: (email, password) =>
-      api.post('/api/auth/login', { email, password })
+      api.post('/api/auth/login', { 
+        email, 
+        password,
+        client_id: APP_CONFIG.DEFAULT_CLIENT_ID 
+      })
         .then(response => response.data)
         .catch(handleApiError),
     
-    register: (userData) =>
-      api.post('/api/auth/register', userData)
+    register: (email, password) =>
+      api.post('/api/auth/register', { 
+        email, 
+        password,
+        client_id: APP_CONFIG.DEFAULT_CLIENT_ID 
+      })
         .then(response => response.data)
         .catch(handleApiError),
     

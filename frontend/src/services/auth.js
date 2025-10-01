@@ -57,6 +57,23 @@ class AuthService {
     }
   }
 
+  async signup(email, password) {
+    try {
+      const response = await apiService.auth.register(email, password);
+      
+      if (response.access_token) {
+        this.setToken(response.access_token);
+        this.setRefreshToken(response.refresh_token);
+        this.setUser(response.user);
+      }
+      
+      return response;
+    } catch (error) {
+      this.clearToken();
+      throw error;
+    }
+  }
+
   async logout() {
     try {
       const refreshToken = this.getRefreshToken();
