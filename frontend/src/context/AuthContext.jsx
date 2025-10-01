@@ -89,7 +89,6 @@ export const AuthProvider = ({ children }) => {
         },
       });
     } catch (error) {
-      // Token is invalid, clear it
       authService.clearToken();
       dispatch({ type: 'AUTH_LOGOUT' });
     }
@@ -100,6 +99,30 @@ export const AuthProvider = ({ children }) => {
       dispatch({ type: 'AUTH_START' });
       
       const response = await authService.login(email, password);
+      
+      dispatch({
+        type: 'AUTH_SUCCESS',
+        payload: {
+          user: response.user,
+          client: response.client,
+        },
+      });
+      
+      return response;
+    } catch (error) {
+      dispatch({
+        type: 'AUTH_FAILURE',
+        payload: error.message,
+      });
+      throw error;
+    }
+  };
+
+  const signup = async (email, password) => {
+    try {
+      dispatch({ type: 'AUTH_START' });
+      
+      const response = await authService.signup(email, password);
       
       dispatch({
         type: 'AUTH_SUCCESS',
@@ -143,6 +166,7 @@ export const AuthProvider = ({ children }) => {
   const value = {
     ...state,
     login,
+    signup,
     loginWithOAuth,
     logout,
     clearError,

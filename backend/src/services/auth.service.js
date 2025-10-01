@@ -358,6 +358,183 @@ class AuthService {
       throw error;
     }
   }
+
+  async exchangeOAuthCode(provider, code) {
+    try {
+      let userInfo;
+      
+      if (provider === 'google') {
+        userInfo = await this.exchangeGoogleCode(code);
+      } else if (provider === 'github') {
+        userInfo = await this.exchangeGithubCode(code);
+      } else {
+        throw new Error(`Unsupported OAuth provider: ${provider}`);
+      }
+
+      // Find or create user
+      let user = await User.findByEmail(userInfo.email);
+      
+      if (!user) {
+        // Create new user with OAuth - generate random password for OAuth users
+        user = await User.create({
+          email: userInfo.email,
+          password: crypto.randomString(32),
+          email_verified: userInfo.email_verified || false,
+        });
+      }
+
+      // For now, using a default client_id - in production, this should be passed from the OAuth state
+      const client_id = process.env.DEFAULT_CLIENT_ID;
+      const client = await Client.findById(client_id);
+      
+      if (!client) {
+        throw new Error('Invalid client configuration');
+      }
+
+      // Link user to client if not already linked
+      const clientUserQuery = `
+        SELECT 1 FROM client_users 
+        WHERE user_id = $1 AND client_id = $2 
+        LIMIT 1
+      `;
+      const clientUserResult = await database.query(clientUserQuery, [user.id, client_id]);
+      
+      if (clientUserResult.rows.length === 0) {
+        await database.query(
+          'INSERT INTO client_users (user_id, client_id, roles, created_at) VALUES ($1, $2, $3, NOW())',
+          [user.id, client_id, JSON.stringify(client.default_roles || ['user'])]
+        );
+      }
+
+      // Get user roles
+      const rolesQuery = await database.query(
+        'SELECT roles FROM client_users WHERE user_id = $1 AND client_id = $2',
+        [user.id, client_id]
+      );
+      const userRoles = rolesQuery.rows[0]?.roles || ['user'];
+
+      // Generate tokens
+      const accessToken = await jwtService.generateAccessToken({
+        sub: user.id,
+        email: user.email,
+        client_id: client_id,
+        email_verified: user.email_verified,
+        roles: userRoles,
+      });
+
+      const refreshToken = await jwtService.generateRefreshToken(
+        user.id,
+        client_id,
+        { oauth_provider: provider }
+      );
+
+      // Audit log
+      await database.query(
+        'INSERT INTO audit_logs (user_id, client_id, action, metadata) VALUES ($1, $2, $3, $4)',
+        [user.id, client_id, 'oauth_login', JSON.stringify({ provider })]
+      );
+
+      logger.auth('User logged in via OAuth', { userId: user.id, clientId: client_id, provider });
+
+      return {
+        access_token: accessToken,
+        refresh_token: refreshToken,
+        token_type: 'Bearer',
+        expires_in: 15 * 60,
+        user: {
+          id: user.id,
+          email: user.email,
+          email_verified: user.email_verified,
+          roles: userRoles,
+        },
+      };
+    } catch (error) {
+      logger.error('OAuth code exchange error:', error);
+      throw error;
+    }
+  }
+
+  async exchangeGoogleCode(code) {
+    try {
+      const axios = require('axios');
+      
+      // Exchange code for tokens
+      const tokenResponse = await axios.post('https://oauth2.googleapis.com/token', {
+        code,
+        client_id: process.env.GOOGLE_CLIENT_ID,
+        client_secret: process.env.GOOGLE_CLIENT_SECRET,
+        redirect_uri: `${process.env.API_URL}/api/auth/oauth/google/callback`,
+        grant_type: 'authorization_code',
+      });
+
+      const { access_token, id_token } = tokenResponse.data;
+
+      // Get user info
+      const userInfoResponse = await axios.get('https://www.googleapis.com/oauth2/v2/userinfo', {
+        headers: { Authorization: `Bearer ${access_token}` },
+      });
+
+      const userInfo = userInfoResponse.data;
+
+      return {
+        email: userInfo.email,
+        email_verified: userInfo.verified_email,
+        oauth_id: userInfo.id,
+        name: userInfo.name,
+        picture: userInfo.picture,
+      };
+    } catch (error) {
+      logger.error('Google OAuth exchange error:', error);
+      throw new Error('Failed to exchange Google OAuth code');
+    }
+  }
+
+  async exchangeGithubCode(code) {
+    try {
+      const axios = require('axios');
+      
+      // Exchange code for access token
+      const tokenResponse = await axios.post(
+        'https://github.com/login/oauth/access_token',
+        {
+          client_id: process.env.GITHUB_CLIENT_ID,
+          client_secret: process.env.GITHUB_CLIENT_SECRET,
+          code,
+          redirect_uri: `${process.env.API_URL}/api/auth/oauth/github/callback`,
+        },
+        {
+          headers: { Accept: 'application/json' },
+        }
+      );
+
+      const { access_token } = tokenResponse.data;
+
+      // Get user info
+      const userInfoResponse = await axios.get('https://api.github.com/user', {
+        headers: { Authorization: `bearer ${access_token}` },
+      });
+
+      const userInfo = userInfoResponse.data;
+
+      // Get user email (GitHub requires separate endpoint)
+      const emailResponse = await axios.get('https://api.github.com/user/emails', {
+        headers: { Authorization: `bearer ${access_token}` },
+      });
+
+      const primaryEmail = emailResponse.data.find(email => email.primary);
+
+      return {
+        email: primaryEmail.email,
+        email_verified: primaryEmail.verified,
+        oauth_id: userInfo.id.toString(),
+        name: userInfo.name || userInfo.login,
+        picture: userInfo.avatar_url,
+      };
+    } catch (error) {
+      logger.error('GitHub OAuth exchange error:', error);
+      throw new Error('Failed to exchange GitHub OAuth code');
+    }
+  }
 }
 
 module.exports = new AuthService();

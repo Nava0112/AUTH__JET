@@ -6,6 +6,7 @@ import Loading from './components/common/Loading';
 
 // Lazy load pages for better performance
 const Login = React.lazy(() => import('./pages/Login'));
+const SignUp = React.lazy(() => import('./pages/SignUp'));
 const Dashboard = React.lazy(() => import('./pages/Dashboard'));
 const Clients = React.lazy(() => import('./pages/Clients'));
 const Users = React.lazy(() => import('./pages/Users'));
@@ -14,7 +15,6 @@ const Settings = React.lazy(() => import('./pages/Settings'));
 // Protected route component
 const ProtectedRoute = ({ children }) => {
   const { isAuthenticated, isLoading } = useAuth();
-  
   if (isLoading) {
     return <Loading />;
   }
@@ -44,6 +44,17 @@ function AppContent() {
             <PublicRoute>
               <React.Suspense fallback={<Loading />}>
                 <Login />
+              </React.Suspense>
+            </PublicRoute>
+          } 
+        />
+        
+        <Route 
+          path="/signup" 
+          element={
+            <PublicRoute>
+              <React.Suspense fallback={<Loading />}>
+                <SignUp />
               </React.Suspense>
             </PublicRoute>
           } 
