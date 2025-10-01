@@ -3,7 +3,7 @@ const authController = require('../controllers/auth.controller');
 const authService = require('../services/auth.service');
 const { authenticateJWT } = require('../middleware/auth');
 const { validateRegistration, validateLogin } = require('../middleware/validation');
-const { authRateLimit } = require('../middleware/rateLimit');
+const { authRateLimit, strictAuthLimiter } = require('../middleware/rateLimit');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -132,9 +132,7 @@ router.get('/oauth/google/callback', async (req, res) => {
     if (tokens.refreshToken) {
       redirectUrl.searchParams.set('refresh_token', tokens.refreshToken);
     }
-    redirectUrl.searchParams.set('user_id', oauthResult.user.id);
-    redirectUrl.searchParams.set('user_email', oauthResult.user.email);
-    redirectUrl.searchParams.set('user_name', oauthResult.user.name || '');
+    redirectUrl.searchParams.set('user', JSON.stringify(oauthResult.user));
     redirectUrl.searchParams.set('success', 'true');
     redirectUrl.searchParams.set('provider', 'google');
 
@@ -243,9 +241,7 @@ router.get('/oauth/github/callback', async (req, res) => {
     if (tokens.refreshToken) {
       redirectUrl.searchParams.set('refresh_token', tokens.refreshToken);
     }
-    redirectUrl.searchParams.set('user_id', oauthResult.user.id);
-    redirectUrl.searchParams.set('user_email', oauthResult.user.email);
-    redirectUrl.searchParams.set('user_name', oauthResult.user.name || '');
+    redirectUrl.searchParams.set('user', JSON.stringify(oauthResult.user));
     redirectUrl.searchParams.set('success', 'true');
     redirectUrl.searchParams.set('provider', 'github');
 
@@ -263,8 +259,13 @@ router.get('/oauth/github/callback', async (req, res) => {
 });
 
 // Protected routes
-router.get('/me', authenticateJWT, async (req, res, next) => {
+router.get('/me', strictAuthLimiter, authenticateJWT, async (req, res, next) => {
   try {
+    // Prevent caching of auth state
+    res.set('Cache-Control', 'no-store');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+
     res.json({
       user: req.user,
       client: {

@@ -22,6 +22,26 @@ class AuthJetApp {
     this.setupMiddleware();
     this.setupRoutes();
     this.setupErrorHandling();
+
+    // Simple in-memory request spike guard (development only)
+    this.app.use((req, res, next) => {
+      const now = Date.now();
+      const clientIP = req.ip || req.connection?.remoteAddress;
+      if (!this.app.requestCounts) {
+        this.app.requestCounts = new Map();
+      }
+      const entry = this.app.requestCounts.get(clientIP) || { count: 0, lastReset: now };
+      if (now - entry.lastReset > 60000) {
+        entry.count = 0;
+        entry.lastReset = now;
+      }
+      entry.count++;
+      this.app.requestCounts.set(clientIP, entry);
+      if (entry.count > 50 && process.env.NODE_ENV !== 'production') {
+        console.warn(`Excessive requests from ${clientIP}: ${entry.count} in last minute`);
+      }
+      next();
+    });
   }
 
   setupMiddleware() {
@@ -59,7 +79,7 @@ class AuthJetApp {
 
     const authLimiter = rateLimit({
       windowMs: 60 * 60 * 1000, // 1 hour
-      max: 5, // 5 login attempts per hour
+      max: process.env.NODE_ENV === 'development' ? 1000 : 5, // 5 login attempts per hour
       message: 'Too many authentication attempts, please try again later.',
     });
 
@@ -81,6 +101,9 @@ class AuthJetApp {
         maxAge: 10 * 60 * 1000, // 10 minutes for OAuth flows
       },
     }));
+
+    // Disable ETag to avoid 304 loops on dynamic auth endpoints
+    this.app.set('etag', false);
 
     // Logging
     this.app.use(morgan('combined', { stream: logger.stream }));
@@ -104,11 +127,12 @@ class AuthJetApp {
     this.app.use('/api/clients', clientRoutes);
     this.app.use('/api/users', userRoutes);
     this.app.use('/api/webhooks', webhookRoutes);
+    this.app.use('/api/analytics', require('./routes/analytics.routes'));
 
     // JWKS endpoint
     this.app.get('/.well-known/jwks.json', (req, res) => {
       try {
-        const jwk = require('./config/jwt').getPublicJwk();
+        const jwk = require('./services/jwt.service').getPublicJwk();
         res.json({ keys: [jwk] });
       } catch (error) {
         res.status(500).json({ error: 'Failed to retrieve JWKS' });

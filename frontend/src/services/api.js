@@ -9,45 +9,66 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  withCredentials: true,
 });
+
+// Deduplicate concurrent identical requests (method+url+params)
+const pendingRequests = new Map();
 
 // Request interceptor to add auth token
 api.interceptors.request.use(
   (config) => {
     const token = authService.getToken();
-    
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+
+    // Create a more specific request ID that includes params to avoid over-aggressive cancellation
+    const requestId = `${config.method}-${config.url}-${JSON.stringify(config.params || {})}`;
     
+    // Only cancel if the exact same request (including params) is pending
+    if (pendingRequests.has(requestId)) {
+      const existingRequest = pendingRequests.get(requestId);
+      // Only cancel if the request is still pending (not already completed)
+      if (existingRequest && !existingRequest.token.reason) {
+        existingRequest.cancel('Duplicate request cancelled');
+      }
+    }
+    
+    const cancelSource = axios.CancelToken.source();
+    config.cancelToken = cancelSource.token;
+    pendingRequests.set(requestId, cancelSource);
+
     return config;
   },
-  (error) => {
-    return Promise.reject(error);
-  }
+  (error) => Promise.reject(error)
 );
 
 // Response interceptor to handle token refresh
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    const requestId = `${response.config.method}-${response.config.url}-${JSON.stringify(response.config.params || {})}`;
+    pendingRequests.delete(requestId);
+    return response;
+  },
   async (error) => {
-    const originalRequest = error.config;
+    if (axios.isCancel(error)) {
+      return Promise.reject(error);
+    }
 
-    // If error is 401 and we haven't tried refreshing yet
+    const originalRequest = error.config || {};
+    const requestId = `${originalRequest.method}-${originalRequest.url}-${JSON.stringify(originalRequest.params || {})}`;
+    pendingRequests.delete(requestId);
+
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
-
       try {
-        // Try to refresh the token
         await authService.refreshToken();
-        
-        // Retry the original request
         const token = authService.getToken();
+        originalRequest.headers = originalRequest.headers || {};
         originalRequest.headers.Authorization = `Bearer ${token}`;
-        
         return api(originalRequest);
       } catch (refreshError) {
-        // Refresh failed, logout user
         authService.clearToken();
         window.location.href = '/login';
         return Promise.reject(refreshError);
@@ -60,6 +81,11 @@ api.interceptors.response.use(
 
 // Generic error handler
 const handleApiError = (error) => {
+  // Don't throw errors for cancelled requests
+  if (axios.isCancel(error)) {
+    throw error; // Let the calling code handle cancellation
+  }
+  
   if (error.response) {
     // Server responded with error status
     const message = error.response.data?.error || error.response.data?.message || 'An error occurred';
@@ -97,13 +123,13 @@ const apiServiceObj = {
         .then(response => response.data)
         .catch(handleApiError),
     
-    logout: () =>
-      api.post('/api/auth/logout')
+    logout: (payload) =>
+      api.post('/api/auth/logout', payload)
         .then(response => response.data)
         .catch(handleApiError),
     
-    refreshToken: () =>
-      api.post('/api/auth/refresh')
+    refreshToken: (payload) =>
+      api.post('/api/auth/refresh', payload)
         .then(response => response.data)
         .catch(handleApiError),
     

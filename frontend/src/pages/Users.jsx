@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { apiService } from '../services/api';
 import Loading from '../components/common/Loading';
+import axios from 'axios';
 
 const Users = () => {
   const [users, setUsers] = useState([]);
@@ -27,7 +28,9 @@ const Users = () => {
         setSelectedClient(response.clients[0].id);
       }
     } catch (err) {
-      setError('Failed to load clients');
+      if (!axios.isCancel(err)) {
+        setError('Failed to load clients');
+      }
     }
   };
 
@@ -37,7 +40,9 @@ const Users = () => {
       const response = await apiService.users.list(clientId, { limit: 50 });
       setUsers(response.users);
     } catch (err) {
-      setError(err.message);
+      if (!axios.isCancel(err)) {
+        setError(err.message);
+      }
     } finally {
       setLoading(false);
     }
@@ -45,7 +50,6 @@ const Users = () => {
 
   const formatDate = (dateString) => {
     return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
       month: 'short',
       day: 'numeric',
       hour: '2-digit',

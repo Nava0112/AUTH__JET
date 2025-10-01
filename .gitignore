@@ -4,9 +4,6 @@ package-lock.json
 yarn.lock
 
 # Environment variables
-.env
-.env.local
-.env.production
 
 # Logs
 logs/
@@ -42,6 +39,8 @@ Thumbs.db
 tmp/
 temp/
 
+
+
 *.md
 
 backend/database.json
@@ -56,3 +55,15 @@ backend/fix-env.js
 backend/fix-crypto.js
 backend/OAUTH_SETUP.md
 backend/check-auth-flow.js
+backend/check-schema.js
+backend/create-users-view.js
+backend/verify-database.js
+backend/test-oauth-ready.js
+backend/verify-oauth.js
+backend/test-oauth-final.js
+backend/test-auth-flows.js
+backend/fix-supabase-schema.js
+
+.env
+.env.local
+.env.production

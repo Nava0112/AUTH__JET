@@ -372,23 +372,23 @@ class AuthService {
   async exchangeOAuthCode(code, provider, redirectUri) {
     try {
       logger.info('Starting OAuth code exchange', { provider, redirectUri });
-  
+
       // Validate provider
       if (!['google', 'github'].includes(provider)) {
         throw new Error(`Unsupported OAuth provider: ${provider}`);
       }
-  
+
       // Validate configuration
       if (provider === 'google' && (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET)) {
         throw new Error('Google OAuth configuration is missing');
       }
-  
+
       if (provider === 'github' && (!process.env.GITHUB_CLIENT_ID || !process.env.GITHUB_CLIENT_SECRET)) {
         throw new Error('GitHub OAuth configuration is missing');
       }
-  
+
       let userProfile;
-  
+
       // Exchange code for tokens based on provider
       switch (provider) {
         case 'google':
@@ -400,40 +400,65 @@ class AuthService {
         default:
           throw new Error(`Unsupported OAuth provider: ${provider}`);
       }
-  
+
       logger.info('OAuth user profile received', { 
         email: userProfile.email, 
         provider: provider 
       });
-  
+
       // Find or create user in database
       let user = await User.findByEmail(userProfile.email);
-  
+
       if (!user) {
         logger.info('Creating new user from OAuth', { email: userProfile.email });
-        // Create new user
-        user = await User.create({
-          email: userProfile.email,
-          name: userProfile.name,
-          provider: provider,
-          providerId: userProfile.id,
-          emailVerified: userProfile.email_verified || true,
-          avatar: userProfile.picture || userProfile.avatar_url
-        });
+        // Create new user with OAuth data
+        const createQuery = `
+          INSERT INTO users (id, email, name, provider, provider_id, avatar, email_verified, created_at, updated_at)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+          RETURNING *
+        `;
+        
+        const userId = crypto.generateId();
+        const result = await database.query(createQuery, [
+          userId,
+          userProfile.email,
+          userProfile.name || userProfile.email.split('@')[0],
+          provider,
+          userProfile.id,
+          userProfile.picture || userProfile.avatar_url,
+          userProfile.email_verified || true
+        ]);
+        
+        user = result.rows[0];
+        
+        // Link user to default client
+        await this.linkUserToDefaultClient(user.id);
       } else {
         logger.info('Existing user found for OAuth', { userId: user.id });
         // Update user with latest OAuth info
-        user.provider = provider;
-        user.providerId = userProfile.id;
-        user.avatar = userProfile.picture || userProfile.avatar_url;
-        await user.save();
+        const updateQuery = `
+          UPDATE users 
+          SET provider = $1, provider_id = $2, avatar = $3, email_verified = $4, updated_at = NOW()
+          WHERE id = $5
+          RETURNING *
+        `;
+        
+        const updateResult = await database.query(updateQuery, [
+          provider,
+          userProfile.id,
+          userProfile.picture || userProfile.avatar_url,
+          userProfile.email_verified || true,
+          user.id
+        ]);
+        
+        user = updateResult.rows[0];
       }
-  
+
       // Generate JWT tokens
       const tokens = await this.generateTokens(user);
       
       logger.info('OAuth tokens generated successfully', { userId: user.id });
-  
+
       return {
         user: {
           id: user.id,
@@ -452,116 +477,157 @@ class AuthService {
       throw new Error(`OAuth authentication failed: ${error.message}`);
     }
   }
-  
+
+  async linkUserToDefaultClient(userId) {
+    try {
+      const defaultClient = await this.ensureDefaultClient();
+      
+      const linkQuery = `
+        INSERT INTO client_users (user_id, client_id, roles, created_at)
+        VALUES ($1, $2, $3, NOW())
+        ON CONFLICT (user_id, client_id) DO NOTHING
+      `;
+      
+      await database.query(linkQuery, [
+        userId,
+        defaultClient.id,
+        JSON.stringify(['user'])
+      ]);
+      
+      logger.info('User linked to default client', { userId, clientId: defaultClient.id });
+    } catch (error) {
+      logger.error('Failed to link user to default client:', error);
+      throw error;
+    }
+  }
+
   // Google OAuth exchange
   async exchangeGoogleCode(code, redirectUri) {
-    const { OAuth2Client } = require('google-auth-library');
-    
-    if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
-      throw new Error('Google OAuth not configured');
+    try {
+      // Use dynamic import to handle missing module gracefully
+      let OAuth2Client;
+      try {
+        const googleAuth = require('google-auth-library');
+        OAuth2Client = googleAuth.OAuth2Client;
+      } catch (error) {
+        logger.error('Google auth library not found. Please run: npm install google-auth-library');
+        throw new Error('OAuth provider not configured properly');
+      }
+      
+      if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+        throw new Error('Google OAuth not configured');
+      }
+
+      const client = new OAuth2Client(
+        process.env.GOOGLE_CLIENT_ID,
+        process.env.GOOGLE_CLIENT_SECRET,
+        redirectUri
+      );
+
+      logger.info('Exchanging Google code for tokens');
+      const { tokens } = await client.getToken(code);
+      
+      if (!tokens.id_token) {
+        throw new Error('No ID token received from Google');
+      }
+
+      logger.info('Verifying Google ID token');
+      const ticket = await client.verifyIdToken({
+        idToken: tokens.id_token,
+        audience: process.env.GOOGLE_CLIENT_ID
+      });
+
+      const payload = ticket.getPayload();
+      
+      if (!payload.email) {
+        throw new Error('No email in Google OAuth response');
+      }
+
+      return {
+        id: payload.sub,
+        email: payload.email,
+        name: payload.name,
+        picture: payload.picture,
+        email_verified: payload.email_verified
+      };
+    } catch (error) {
+      logger.error('Google OAuth exchange failed:', error);
+      throw new Error(`Google OAuth failed: ${error.message}`);
     }
-  
-    const client = new OAuth2Client(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
-      redirectUri
-    );
-  
-    logger.info('Exchanging Google code for tokens');
-    const { tokens } = await client.getToken(code);
-    
-    if (!tokens.id_token) {
-      throw new Error('No ID token received from Google');
-    }
-  
-    logger.info('Verifying Google ID token');
-    const ticket = await client.verifyIdToken({
-      idToken: tokens.id_token,
-      audience: process.env.GOOGLE_CLIENT_ID
-    });
-  
-    const payload = ticket.getPayload();
-    
-    if (!payload.email) {
-      throw new Error('No email in Google OAuth response');
-    }
-  
-    return {
-      id: payload.sub,
-      email: payload.email,
-      name: payload.name,
-      picture: payload.picture,
-      email_verified: payload.email_verified
-    };
   }
   
   // GitHub OAuth exchange
   async exchangeGitHubCode(code, redirectUri) {
     const axios = require('axios');
     
-    if (!process.env.GITHUB_CLIENT_ID || !process.env.GITHUB_CLIENT_SECRET) {
-      throw new Error('GitHub OAuth not configured');
-    }
-  
-    logger.info('Exchanging GitHub code for access token');
-    // Exchange code for access token
-    const tokenResponse = await axios.post(
-      'https://github.com/login/oauth/access_token',
-      {
-        client_id: process.env.GITHUB_CLIENT_ID,
-        client_secret: process.env.GITHUB_CLIENT_SECRET,
-        code: code,
-        redirect_uri: redirectUri
-      },
-      {
-        headers: { Accept: 'application/json' },
-        timeout: 10000
+    try {
+      if (!process.env.GITHUB_CLIENT_ID || !process.env.GITHUB_CLIENT_SECRET) {
+        throw new Error('GitHub OAuth not configured');
       }
-    );
-  
-    if (tokenResponse.data.error) {
-      throw new Error(`GitHub OAuth error: ${tokenResponse.data.error_description}`);
+
+      logger.info('Exchanging GitHub code for access token');
+      // Exchange code for access token
+      const tokenResponse = await axios.post(
+        'https://github.com/login/oauth/access_token',
+        {
+          client_id: process.env.GITHUB_CLIENT_ID,
+          client_secret: process.env.GITHUB_CLIENT_SECRET,
+          code: code,
+          redirect_uri: redirectUri
+        },
+        {
+          headers: { Accept: 'application/json' },
+          timeout: 10000
+        }
+      );
+
+      if (tokenResponse.data.error) {
+        throw new Error(`GitHub OAuth error: ${tokenResponse.data.error_description}`);
+      }
+
+      const accessToken = tokenResponse.data.access_token;
+
+      if (!accessToken) {
+        throw new Error('No access token received from GitHub');
+      }
+
+      logger.info('Fetching GitHub user profile');
+      // Get user profile
+      const userResponse = await axios.get('https://api.github.com/user', {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: 'application/json'
+        },
+        timeout: 10000
+      });
+
+      logger.info('Fetching GitHub user emails');
+      // Get user emails
+      const emailsResponse = await axios.get('https://api.github.com/user/emails', {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: 'application/json'
+        },
+        timeout: 10000
+      });
+
+      const primaryEmail = emailsResponse.data.find(email => email.primary && email.verified) || emailsResponse.data[0];
+
+      if (!primaryEmail || !primaryEmail.email) {
+        throw new Error('No verified email found for GitHub user');
+      }
+
+      return {
+        id: userResponse.data.id,
+        email: primaryEmail.email,
+        name: userResponse.data.name || userResponse.data.login,
+        avatar_url: userResponse.data.avatar_url,
+        email_verified: primaryEmail.verified
+      };
+    } catch (error) {
+      logger.error('GitHub OAuth exchange failed:', error);
+      throw new Error(`GitHub OAuth failed: ${error.message}`);
     }
-  
-    const accessToken = tokenResponse.data.access_token;
-  
-    if (!accessToken) {
-      throw new Error('No access token received from GitHub');
-    }
-  
-    logger.info('Fetching GitHub user profile');
-    // Get user profile
-    const userResponse = await axios.get('https://api.github.com/user', {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Accept: 'application/json'
-      },
-      timeout: 10000
-    });
-  
-    logger.info('Fetching GitHub user emails');
-    // Get user emails
-    const emailsResponse = await axios.get('https://api.github.com/user/emails', {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Accept: 'application/json'
-      },
-      timeout: 10000
-    });
-  
-    const primaryEmail = emailsResponse.data.find(email => email.primary && email.verified) || emailsResponse.data[0];
-  
-    if (!primaryEmail || !primaryEmail.email) {
-      throw new Error('No verified email found for GitHub user');
-    }
-  
-    return {
-      id: userResponse.data.id,
-      email: primaryEmail.email,
-      name: userResponse.data.name || userResponse.data.login,
-      avatar_url: userResponse.data.avatar_url,
-      email_verified: primaryEmail.verified
-    };
   }
 
   async ensureDefaultClient() {
@@ -574,25 +640,29 @@ class AuthService {
       if (!client) {
         logger.info('Default client not found, creating...');
         
-        // Create default client
+        // Create default client (aligned with current schema)
         const createQuery = `
           INSERT INTO clients (
-            id, name, api_key, api_secret, allowed_origins, 
-            allowed_redirect_uris, default_roles, plan_type, created_at, updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+            id, name, contact_email, website, business_type, api_key, secret_key_hash, allowed_domains,
+            allowed_redirect_uris, default_roles, plan_type, is_active, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, true, NOW(), NOW())
           RETURNING *
         `;
         
         const apiKey = 'cli_dev_' + crypto.randomString(24);
-        const apiSecret = crypto.randomString(32);
+        const secretKey = crypto.randomString(32);
+        const secretKeyHash = await crypto.hashPassword(secretKey);
         
         const result = await database.query(createQuery, [
           DEFAULT_CLIENT_ID,
           'AuthJet Development Client',
+          'dev@authjet.local',
+          'http://localhost:3000',
+          'development',
           apiKey,
-          crypto.hashToken(apiSecret),
-          JSON.stringify(['http://localhost:3000', 'http://127.0.0.1:3000']),
-          JSON.stringify(['http://localhost:3000', 'http://localhost:3000/auth/callback']),
+          secretKeyHash,
+          JSON.stringify(['localhost', '127.0.0.1']),
+          JSON.stringify(['http://localhost:3000/oauth/callback']),
           JSON.stringify(['user']),
           'free'
         ]);

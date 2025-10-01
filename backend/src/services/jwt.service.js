@@ -5,73 +5,41 @@ const logger = require('../utils/logger');
 
 class JWTService {
   constructor() {
-    this.privateKey = null;
-    this.publicKey = null;
-    this.algorithm = 'RS256';
-    this.init();
-  }
+    this.algorithm = 'HS256';
+    this.accessTokenExpirySeconds = 15 * 60; // 15 minutes
+    this.refreshTokenExpiryMs = 7 * 24 * 60 * 60 * 1000; // 7 days
+    this.issuer = 'authjet-saas';
+    this.audience = 'client-app';
 
-  init() {
-    // Generate RSA key pair if not exists
-    if (!this.privateKey) {
-      this.generateKeyPair();
-    }
-  }
-
-  generateKeyPair() {
-    try {
-      const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', {
-        modulusLength: 2048,
-        publicKeyEncoding: {
-          type: 'spki',
-          format: 'pem',
-        },
-        privateKeyEncoding: {
-          type: 'pkcs8',
-          format: 'pem',
-        },
-      });
-
-      this.privateKey = privateKey;
-      this.publicKey = publicKey;
-
-      logger.info('RSA key pair generated successfully');
-    } catch (error) {
-      logger.error('Failed to generate RSA key pair:', error);
-      throw error;
+    this.secret = process.env.JWT_SECRET;
+    if (!this.secret) {
+      this.secret = crypto.randomBytes(64).toString('hex');
+      logger.warn('JWT_SECRET not set. Generated a temporary secret. Set JWT_SECRET in environment for stability.');
     }
   }
 
   getPublicJwk() {
-    if (!this.publicKey) {
-      throw new Error('Public key not available');
-    }
-
-    // Convert PEM to JWK format
-    const key = crypto.createPublicKey(this.publicKey);
-    const jwk = {
-      kty: 'RSA',
+    // For HMAC, this exposes the secret and should not be used in production.
+    // Kept for compatibility with existing /.well-known/jwks.json endpoint in dev.
+    return {
+      kty: 'oct',
       use: 'sig',
-      alg: 'RS256',
-      n: Buffer.from(key.export({ type: 'spki', format: 'der' }))
-        .toString('base64url'),
-      e: 'AQAB', // Standard exponent for RSA
+      alg: this.algorithm,
+      k: Buffer.from(this.secret).toString('base64url'),
     };
-
-    return jwk;
   }
 
   async generateAccessToken(payload) {
     const tokenPayload = {
       ...payload,
-      iss: 'authjet-saas',
-      aud: 'client-app',
+      iss: this.issuer,
+      aud: this.audience,
       iat: Math.floor(Date.now() / 1000),
-      exp: Math.floor(Date.now() / 1000) + (15 * 60), // 15 minutes
+      exp: Math.floor(Date.now() / 1000) + this.accessTokenExpirySeconds,
     };
 
     return new Promise((resolve, reject) => {
-      jwt.sign(tokenPayload, this.privateKey, { algorithm: this.algorithm }, (err, token) => {
+      jwt.sign(tokenPayload, this.secret, { algorithm: this.algorithm }, (err, token) => {
         if (err) {
           logger.error('Failed to generate access token:', err);
           reject(err);
@@ -86,7 +54,7 @@ class JWTService {
     const refreshToken = crypto.randomBytes(40).toString('hex');
     const hashedToken = crypto.createHash('sha256').update(refreshToken).digest('hex');
     
-    const expiresAt = new Date(Date.now() + (7 * 24 * 60 * 60 * 1000)); // 7 days
+    const expiresAt = new Date(Date.now() + this.refreshTokenExpiryMs);
 
     // Store refresh token in database
     const query = `
@@ -108,7 +76,7 @@ class JWTService {
 
   async verifyToken(token) {
     return new Promise((resolve, reject) => {
-      jwt.verify(token, this.publicKey, { algorithms: [this.algorithm] }, (err, decoded) => {
+      jwt.verify(token, this.secret, { algorithms: [this.algorithm] }, (err, decoded) => {
         if (err) {
           logger.warn('Token verification failed:', err.message);
           reject(err);
