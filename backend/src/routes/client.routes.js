@@ -1,6 +1,7 @@
 const express = require('express');
 const clientController = require('../controllers/client.controller');
 const { authenticateJWT, requireRole } = require('../middleware/auth');
+const { requireClientReadAccess, requireClientWriteAccess } = require('../middleware/clientAccess');
 const { validateClientCreation, validatePagination } = require('../middleware/validation');
 const { createUserRateLimit } = require('../middleware/rateLimit');
 
@@ -17,11 +18,11 @@ router.post('/', requireRole(['admin']), validateClientCreation, (req, res, next
   clientController.createClient(req, res, next);
 });
 
-router.get('/', requireRole(['admin', 'viewer']), validatePagination, (req, res, next) => {
+router.get('/', requireClientReadAccess(), validatePagination, (req, res, next) => {
   clientController.getClients(req, res, next);
 });
 
-router.get('/:id', requireRole(['admin', 'viewer']), (req, res, next) => {
+router.get('/:id', requireClientReadAccess(), (req, res, next) => {
   clientController.getClient(req, res, next);
 });
 
@@ -37,7 +38,7 @@ router.post('/:id/regenerate-key', requireRole(['admin']), (req, res, next) => {
   clientController.regenerateApiKey(req, res, next);
 });
 
-router.get('/:id/stats', requireRole(['admin', 'viewer']), (req, res, next) => {
+router.get('/:id/stats', requireClientReadAccess(), (req, res, next) => {
   clientController.getClientStats(req, res, next);
 });
 

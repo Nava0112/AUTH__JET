@@ -106,6 +106,10 @@ class CryptoUtils {
     return crypto.randomUUID();
   }
 
+  generateId() {
+    return crypto.randomUUID();
+  }
+
   generateCode(length = 6) {
     const chars = '0123456789';
     let code = '';

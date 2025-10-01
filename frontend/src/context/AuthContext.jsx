@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useReducer, useEffect } from 'react';
+import React, { createContext, useContext, useReducer, useEffect, useRef, useCallback, useMemo } from 'react';
 import { authService } from '../services/auth';
 import { api } from '../services/api';
 
@@ -62,12 +62,11 @@ const initialState = {
 export const AuthProvider = ({ children }) => {
   const [state, dispatch] = useReducer(authReducer, initialState);
 
-  // Check authentication status on app start
-  useEffect(() => {
-    checkAuthStatus();
-  }, []);
+  const checkingRef = useRef(false);
 
-  const checkAuthStatus = async () => {
+  const checkAuthStatus = useCallback(async () => {
+    if (checkingRef.current) return;
+    checkingRef.current = true;
     try {
       dispatch({ type: 'SET_LOADING', payload: true });
       
@@ -91,10 +90,17 @@ export const AuthProvider = ({ children }) => {
     } catch (error) {
       authService.clearToken();
       dispatch({ type: 'AUTH_LOGOUT' });
+    } finally {
+      checkingRef.current = false;
     }
-  };
+  }, [dispatch]);
 
-  const login = async (email, password) => {
+  // Check authentication status on app start
+  useEffect(() => {
+    checkAuthStatus();
+  }, [checkAuthStatus]);
+
+  const login = useCallback(async (email, password) => {
     try {
       dispatch({ type: 'AUTH_START' });
       
@@ -116,9 +122,9 @@ export const AuthProvider = ({ children }) => {
       });
       throw error;
     }
-  };
+  }, [dispatch]);
 
-  const signup = async (email, password) => {
+  const signup = useCallback(async (email, password) => {
     try {
       dispatch({ type: 'AUTH_START' });
       
@@ -140,15 +146,15 @@ export const AuthProvider = ({ children }) => {
       });
       throw error;
     }
-  };
+  }, [dispatch]);
 
-  const loginWithOAuth = (provider) => {
+  const loginWithOAuth = useCallback((provider) => {
     // Redirect to OAuth provider
     const oauthUrl = `${process.env.REACT_APP_API_URL}/api/auth/oauth/${provider}`;
     window.location.href = oauthUrl;
-  };
+  }, []);
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     try {
       await authService.logout();
     } catch (error) {
@@ -157,13 +163,13 @@ export const AuthProvider = ({ children }) => {
       authService.clearToken();
       dispatch({ type: 'AUTH_LOGOUT' });
     }
-  };
+  }, [dispatch]);
 
-  const clearError = () => {
+  const clearError = useCallback(() => {
     dispatch({ type: 'CLEAR_ERROR' });
-  };
+  }, [dispatch]);
 
-  const value = {
+  const value = useMemo(() => ({
     ...state,
     login,
     signup,
@@ -171,7 +177,7 @@ export const AuthProvider = ({ children }) => {
     logout,
     clearError,
     checkAuthStatus,
-  };
+  }), [state, login, signup, loginWithOAuth, logout, clearError, checkAuthStatus]);
 
   return (
     <AuthContext.Provider value={value}>

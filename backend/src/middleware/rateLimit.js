@@ -42,7 +42,7 @@ const generalRateLimit = rateLimit({
 // Strict rate limiting for authentication endpoints
 const authRateLimit = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
-  max: 5, // Limit each IP to 5 login attempts per hour
+  max: process.env.NODE_ENV === 'development' ? 1000 : 5,
   message: {
     error: 'Too many authentication attempts, please try again later.',
     code: 'AUTH_RATE_LIMIT_EXCEEDED',
@@ -108,4 +108,16 @@ module.exports = {
   clientRateLimit,
   webhookRateLimit,
   createUserRateLimit,
+  // Additional exports for stricter auth control
+  strictAuthLimiter: rateLimit({
+    windowMs: 60 * 1000,
+    max: 10,
+    message: {
+      error: 'Too many authentication requests',
+      code: 'RATE_LIMIT_EXCEEDED',
+    },
+    standardHeaders: true,
+    legacyHeaders: false,
+    store: createRateLimitStore(),
+  }),
 };

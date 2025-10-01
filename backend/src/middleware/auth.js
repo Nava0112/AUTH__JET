@@ -13,17 +13,17 @@ const authenticateJWT = async (req, res, next) => {
       });
     }
 
-    const token = authHeader.substring(7); // Remove 'Bearer ' prefix
+    const token = authHeader.substring(7);
 
     try {
       const decoded = await jwtService.verifyToken(token);
       
-      // Verify user still exists and is active
+      // Verify user still exists
       const userQuery = `
         SELECT u.*, cu.roles, cu.client_id
         FROM users u
         JOIN client_users cu ON u.id = cu.user_id
-        WHERE u.id = $1 AND u.status = 'active'
+        WHERE u.id = $1
       `;
       
       const userResult = await database.query(userQuery, [decoded.sub]);

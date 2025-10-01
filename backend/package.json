@@ -59,7 +59,9 @@
     "eslint-config-prettier": "^9.0.0",
     "eslint-plugin-prettier": "^5.0.0",
     "prettier": "^3.0.2",
-    "nock": "^13.3.2"
+    "nock": "^13.3.2",
+    "google-auth-library": "^9.0.0",
+    "axios": "^1.6.2"
   },
   "engines": {
     "node": ">=18.0.0",

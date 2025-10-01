@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { apiService } from '../services/api';
+import axios from 'axios';
 
 export const useClients = () => {
   const [clients, setClients] = useState([]);
@@ -23,7 +24,9 @@ export const useClients = () => {
       
       return response;
     } catch (err) {
-      setError(err.message);
+      if (!axios.isCancel(err)) {
+        setError(err.message);
+      }
       throw err;
     } finally {
       setLoading(false);
@@ -42,7 +45,9 @@ export const useClients = () => {
       
       return response;
     } catch (err) {
-      setError(err.message);
+      if (!axios.isCancel(err)) {
+        setError(err.message);
+      }
       throw err;
     } finally {
       setLoading(false);
@@ -63,7 +68,9 @@ export const useClients = () => {
       
       return response;
     } catch (err) {
-      setError(err.message);
+      if (!axios.isCancel(err)) {
+        setError(err.message);
+      }
       throw err;
     } finally {
       setLoading(false);
@@ -87,7 +94,9 @@ export const useClients = () => {
         await fetchClients(pagination.page);
       }
     } catch (err) {
-      setError(err.message);
+      if (!axios.isCancel(err)) {
+        setError(err.message);
+      }
       throw err;
     } finally {
       setLoading(false);
@@ -108,7 +117,9 @@ export const useClients = () => {
       
       return response;
     } catch (err) {
-      setError(err.message);
+      if (!axios.isCancel(err)) {
+        setError(err.message);
+      }
       throw err;
     } finally {
       setLoading(false);
@@ -121,7 +132,12 @@ export const useClients = () => {
 
   // Load clients on mount
   useEffect(() => {
-    fetchClients();
+    fetchClients().catch(err => {
+      // Ignore cancelled requests on mount
+      if (!axios.isCancel(err)) {
+        console.error('Failed to fetch clients on mount:', err);
+      }
+    });
   }, [fetchClients]);
 
   return {

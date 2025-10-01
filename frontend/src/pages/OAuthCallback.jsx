@@ -37,13 +37,23 @@ const OAuthCallback = () => {
           return;
         }
 
+        // Debug: Log all URL parameters
+        console.log('OAuth callback URL parameters:', {
+          access_token: searchParams.get('access_token'),
+          refresh_token: searchParams.get('refresh_token'),
+          user: searchParams.get('user'),
+          success: searchParams.get('success'),
+          provider: searchParams.get('provider'),
+          allParams: Object.fromEntries(searchParams.entries())
+        });
+
         // Get tokens from URL parameters (sent by backend)
         const accessToken = searchParams.get('access_token');
         const refreshToken = searchParams.get('refresh_token');
         const userStr = searchParams.get('user');
 
-        if (!accessToken || !refreshToken || !userStr) {
-          throw new Error('Missing authentication data');
+        if (!accessToken || !userStr) {
+          throw new Error(`Missing authentication data. Got: access_token=${!!accessToken}, refresh_token=${!!refreshToken}, user=${!!userStr}`);
         }
 
         // Parse user data
