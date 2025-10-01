@@ -1,0 +1,251 @@
+const logger = require('../utils/logger');
+
+class EmailService {
+  constructor() {
+    this.transporter = this.createTransporter();
+  }
+
+  createTransporter() {
+    // In a real implementation, you would configure nodemailer or similar
+    // For now, we'll log emails instead of actually sending them
+    return {
+      sendMail: (mailOptions) => {
+        logger.info('EMAIL SENT:', {
+          to: mailOptions.to,
+          subject: mailOptions.subject,
+          // Don't log the full HTML content for security
+        });
+        return Promise.resolve({ messageId: 'mock-message-id' });
+      },
+    };
+  }
+
+  async sendWelcomeEmail(email, clientName) {
+    const subject = `Welcome to ${clientName}`;
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background: #4F46E5; color: white; padding: 20px; text-align: center; }
+          .content { padding: 20px; background: #f9f9f9; }
+          .footer { padding: 20px; text-align: center; color: #666; font-size: 12px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>Welcome to ${clientName}</h1>
+          </div>
+          <div class="content">
+            <p>Hello,</p>
+            <p>Welcome to ${clientName}! Your account has been successfully created.</p>
+            <p>You can now sign in to your account using your email address.</p>
+            <p>If you have any questions, please don't hesitate to contact our support team.</p>
+          </div>
+          <div class="footer">
+            <p>This email was sent by AuthJet on behalf of ${clientName}</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    try {
+      await this.transporter.sendMail({
+        to: email,
+        subject,
+        html,
+        from: process.env.SMTP_FROM || 'noreply@authjet.com',
+      });
+      
+      logger.info('Welcome email sent successfully', { email, clientName });
+    } catch (error) {
+      logger.error('Failed to send welcome email:', error);
+      throw error;
+    }
+  }
+
+  async sendClientWelcomeEmail(contactEmail, clientName, apiKey, secretKey) {
+    const subject = `Welcome to AuthJet - Your API Credentials`;
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background: #4F46E5; color: white; padding: 20px; text-align: center; }
+          .content { padding: 20px; background: #f9f9f9; }
+          .credentials { background: #fff; border: 1px solid #ddd; padding: 15px; margin: 15px 0; }
+          .warning { background: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; margin: 15px 0; }
+          .footer { padding: 20px; text-align: center; color: #666; font-size: 12px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>Welcome to AuthJet</h1>
+          </div>
+          <div class="content">
+            <p>Hello ${clientName},</p>
+            <p>Your AuthJet account has been successfully created! Here are your API credentials:</p>
+            
+            <div class="credentials">
+              <p><strong>API Key:</strong> <code>${apiKey}</code></p>
+              <p><strong>Secret Key:</strong> <code>${secretKey}</code></p>
+            </div>
+            
+            <div class="warning">
+              <p><strong>Important:</strong> Save your Secret Key now! You won't be able to see it again.</p>
+            </div>
+            
+            <p>You can start integrating AuthJet into your application using our documentation.</p>
+            <p>If you have any questions, please visit our documentation or contact support.</p>
+          </div>
+          <div class="footer">
+            <p>AuthJet - Secure Authentication as a Service</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    try {
+      await this.transporter.sendMail({
+        to: contactEmail,
+        subject,
+        html,
+        from: process.env.SMTP_FROM || 'noreply@authjet.com',
+      });
+      
+      logger.info('Client welcome email sent successfully', { contactEmail, clientName });
+    } catch (error) {
+      logger.error('Failed to send client welcome email:', error);
+      throw error;
+    }
+  }
+
+  async sendApiKeyResetEmail(contactEmail, clientName, newApiKey, newSecretKey) {
+    const subject = `AuthJet - API Credentials Reset`;
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background: #DC2626; color: white; padding: 20px; text-align: center; }
+          .content { padding: 20px; background: #f9f9f9; }
+          .credentials { background: #fff; border: 1px solid #ddd; padding: 15px; margin: 15px 0; }
+          .warning { background: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; margin: 15px 0; }
+          .footer { padding: 20px; text-align: center; color: #666; font-size: 12px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>API Credentials Reset</h1>
+          </div>
+          <div class="content">
+            <p>Hello ${clientName},</p>
+            <p>Your AuthJet API credentials have been reset as requested.</p>
+            <p><strong>All previous API keys are now invalid.</strong></p>
+            
+            <div class="credentials">
+              <p><strong>New API Key:</strong> <code>${newApiKey}</code></p>
+              <p><strong>New Secret Key:</strong> <code>${newSecretKey}</code></p>
+            </div>
+            
+            <div class="warning">
+              <p><strong>Important:</strong> Save your new Secret Key now! You won't be able to see it again.</p>
+              <p>Update your application with the new credentials immediately.</p>
+            </div>
+            
+            <p>If you did not request this reset, please contact our support team immediately.</p>
+          </div>
+          <div class="footer">
+            <p>AuthJet - Secure Authentication as a Service</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    try {
+      await this.transporter.sendMail({
+        to: contactEmail,
+        subject,
+        html,
+        from: process.env.SMTP_FROM || 'noreply@authjet.com',
+      });
+      
+      logger.info('API key reset email sent successfully', { contactEmail, clientName });
+    } catch (error) {
+      logger.error('Failed to send API key reset email:', error);
+      throw error;
+    }
+  }
+
+  async sendPasswordResetEmail(email, resetToken, clientName) {
+    const resetLink = `${process.env.CLIENT_DASHBOARD_URL}/reset-password?token=${resetToken}`;
+    const subject = `Reset Your ${clientName} Password`;
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background: #4F46E5; color: white; padding: 20px; text-align: center; }
+          .content { padding: 20px; background: #f9f9f9; }
+          .button { background: #4F46E5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; }
+          .footer { padding: 20px; text-align: center; color: #666; font-size: 12px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>Password Reset</h1>
+          </div>
+          <div class="content">
+            <p>Hello,</p>
+            <p>You requested to reset your password for ${clientName}.</p>
+            <p>Click the button below to reset your password:</p>
+            <p style="text-align: center;">
+              <a href="${resetLink}" class="button">Reset Password</a>
+            </p>
+            <p>This link will expire in 1 hour.</p>
+            <p>If you didn't request this reset, please ignore this email.</p>
+          </div>
+          <div class="footer">
+            <p>This email was sent by AuthJet on behalf of ${clientName}</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    try {
+      await this.transporter.sendMail({
+        to: email,
+        subject,
+        html,
+        from: process.env.SMTP_FROM || 'noreply@authjet.com',
+      });
+      
+      logger.info('Password reset email sent successfully', { email, clientName });
+    } catch (error) {
+      logger.error('Failed to send password reset email:', error);
+      throw error;
+    }
+  }
+}
+
+module.exports = new EmailService();
