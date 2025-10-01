@@ -4,8 +4,8 @@ const pool = new Pool({
   host: 'aws-1-ap-south-1.pooler.supabase.com',
   port: 6543,
   database: 'postgres',
-  user: 'postgres.gkvkuuhuxubhnyrjajwy',
-  password: 'Hotspots@050917',
+  user: 'postgres.pxhyjlsbumqrrdqxdsyw',
+  password: 'Navarasan@2005',
   connectionTimeoutMillis: 10000,
 });
 

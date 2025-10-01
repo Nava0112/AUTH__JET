@@ -67,3 +67,5 @@ backend/fix-supabase-schema.js
 .env
 .env.local
 .env.production
+
+backend/*.js

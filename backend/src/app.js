@@ -16,6 +16,11 @@ const clientRoutes = require('./routes/client.routes');
 const userRoutes = require('./routes/user.routes');
 const webhookRoutes = require('./routes/webhook.routes');
 
+// New multi-tenant routes
+const adminRoutes = require('./routes/admin.routes');
+const clientAuthRoutes = require('./routes/clientAuth.routes');
+const userAuthRoutes = require('./routes/userAuth.routes');
+
 class AuthJetApp {
   constructor() {
     this.app = express();
@@ -60,8 +65,9 @@ class AuthJetApp {
     // CORS with dynamic origin validation
     this.app.use(cors({
       origin: (origin, callback) => {
-        const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || [];
-        if (!origin || allowedOrigins.includes(origin)) {
+        const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000', 'http://localhost:3001'];
+        // Allow requests with no origin (mobile apps, curl, etc.)
+        if (!origin || allowedOrigins.includes(origin) || process.env.NODE_ENV === 'development') {
           callback(null, true);
         } else {
           callback(new Error('Not allowed by CORS'));
@@ -123,11 +129,22 @@ class AuthJetApp {
       });
     });
 
+    // OAuth 2.0 routes
+    this.app.use('/oauth', require('./routes/oauth.routes'));
+    this.app.use('/auth', require('./routes/oauth.routes'));
+
+    // Legacy routes (for backward compatibility)
     this.app.use('/api/auth', authRoutes);
     this.app.use('/api/clients', clientRoutes);
     this.app.use('/api/users', userRoutes);
     this.app.use('/api/webhooks', webhookRoutes);
+    
     this.app.use('/api/analytics', require('./routes/analytics.routes'));
+
+    // New multi-tenant routes
+    this.app.use('/api/admin', adminRoutes);
+    this.app.use('/api/client', clientAuthRoutes);
+    this.app.use('/api/user', userAuthRoutes);
 
     // JWKS endpoint
     this.app.get('/.well-known/jwks.json', (req, res) => {
