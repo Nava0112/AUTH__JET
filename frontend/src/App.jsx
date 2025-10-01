@@ -7,6 +7,7 @@ import Loading from './components/common/Loading';
 // Lazy load pages for better performance
 const Login = React.lazy(() => import('./pages/Login'));
 const SignUp = React.lazy(() => import('./pages/SignUp'));
+const OAuthCallback = React.lazy(() => import('./pages/OAuthCallback'));
 const Dashboard = React.lazy(() => import('./pages/Dashboard'));
 const Clients = React.lazy(() => import('./pages/Clients'));
 const Users = React.lazy(() => import('./pages/Users'));
@@ -57,6 +58,16 @@ function AppContent() {
                 <SignUp />
               </React.Suspense>
             </PublicRoute>
+          } 
+        />
+        
+        {/* OAuth callback route - not protected to allow authentication flow */}
+        <Route 
+          path="/oauth/callback" 
+          element={
+            <React.Suspense fallback={<Loading />}>
+              <OAuthCallback />
+            </React.Suspense>
           } 
         />
         
