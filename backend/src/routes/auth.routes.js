@@ -4,6 +4,7 @@ const authService = require('../services/auth.service');
 const { authenticateJWT } = require('../middleware/auth');
 const { validateRegistration, validateLogin } = require('../middleware/validation');
 const { authRateLimit } = require('../middleware/rateLimit');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -30,102 +31,234 @@ router.post('/logout', authRateLimit, (req, res, next) => {
 
 // OAuth routes
 router.get('/oauth/google', (req, res) => {
-  // Initiate Google OAuth flow
-  const state = Math.random().toString(36).substring(2);
-  const nonce = Math.random().toString(36).substring(2);
-  
-  // Store state and nonce in session or database
-  req.session.oauthState = state;
-  req.session.oauthNonce = nonce;
+  try {
+    // Initiate Google OAuth flow
+    const state = Math.random().toString(36).substring(2);
+    const nonce = Math.random().toString(36).substring(2);
+    
+    // Store state and nonce in session or database
+    req.session.oauthState = state;
+    req.session.oauthNonce = nonce;
 
-  const params = new URLSearchParams({
-    client_id: process.env.GOOGLE_CLIENT_ID,
-    redirect_uri: `${process.env.API_URL}/api/auth/oauth/google/callback`,
-    response_type: 'code',
-    scope: 'openid email profile',
-    state,
-    nonce,
-    access_type: 'offline',
-    prompt: 'consent',
-  });
+    const redirectUri = `${process.env.API_URL}/api/auth/oauth/google/callback`;
+    
+    logger.info('Initiating Google OAuth', { state, nonce, redirectUri });
 
-  res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`);
+    const params = new URLSearchParams({
+      client_id: process.env.GOOGLE_CLIENT_ID,
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      scope: 'openid email profile',
+      state: state,
+      nonce: nonce,
+      access_type: 'offline',
+      prompt: 'consent',
+    });
+
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
+    logger.info('Redirecting to Google OAuth', { authUrl: authUrl.substring(0, 100) + '...' });
+    
+    res.redirect(authUrl);
+  } catch (error) {
+    logger.error('Google OAuth initiation error:', error);
+    res.status(500).json({
+      error: 'OAuth initiation failed',
+      code: 'OAUTH_INIT_ERROR'
+    });
+  }
 });
 
-router.get('/oauth/google/callback', async (req, res, next) => {
+router.get('/oauth/google/callback', async (req, res) => {
   try {
-    const { code, state, error } = req.query;
+    const { code, state, error, error_description } = req.query;
+    
+    logger.info('Google OAuth callback received', { 
+      hasCode: !!code, 
+      hasState: !!state, 
+      hasError: !!error,
+      sessionState: req.session?.oauthState,
+      receivedState: state
+    });
 
+    // Handle OAuth errors from provider
     if (error) {
-      return res.redirect(`${process.env.CLIENT_URL}/login?error=oauth_failed`);
+      logger.warn('OAuth error from Google:', { error, error_description, state });
+      return res.redirect(`${process.env.CLIENT_URL}/login?error=oauth_denied&message=${error_description || error}`);
     }
 
-    if (state !== req.session.oauthState) {
+    // Validate state to prevent CSRF
+    if (!state || state !== req.session?.oauthState) {
+      logger.warn('OAuth state mismatch:', { 
+        received: state, 
+        expected: req.session?.oauthState,
+        hasSession: !!req.session
+      });
       return res.redirect(`${process.env.CLIENT_URL}/login?error=invalid_state`);
     }
 
+    // Validate code exists
+    if (!code) {
+      logger.warn('OAuth callback missing authorization code');
+      return res.redirect(`${process.env.CLIENT_URL}/login?error=missing_code`);
+    }
+
     // Exchange code for tokens
-    // This would be implemented with your OAuth service
-    const oauthResult = await authService.exchangeOAuthCode('google', code);
+    logger.info('Exchanging OAuth code for tokens...');
+    const redirectUri = `${process.env.API_URL}/api/auth/oauth/google/callback`;
+    const oauthResult = await authService.exchangeOAuthCode(code, 'google', redirectUri);
 
-    // Clear session
-    req.session.oauthState = null;
-    req.session.oauthNonce = null;
+    logger.info('OAuth exchange successful', { 
+      userId: oauthResult.user?.id,
+      userEmail: oauthResult.user?.email
+    });
 
-    // Redirect to client with tokens
-    const redirectUrl = new URL(`${process.env.CLIENT_URL}/oauth/callback`);
-    redirectUrl.searchParams.set('access_token', oauthResult.access_token);
-    redirectUrl.searchParams.set('refresh_token', oauthResult.refresh_token);
-    redirectUrl.searchParams.set('user', JSON.stringify(oauthResult.user));
+    // Clear session state to prevent reuse
+    if (req.session) {
+      req.session.oauthState = null;
+      req.session.oauthNonce = null;
+    }
+
+    // Generate JWT tokens
+    const tokens = oauthResult.tokens;
+    if (!tokens || !tokens.accessToken) {
+      throw new Error('No tokens generated from OAuth exchange');
+    }
+
+    // Redirect to frontend with tokens
+    const frontendUrl = process.env.CLIENT_URL || 'http://localhost:3000';
+    const redirectUrl = new URL(`${frontendUrl}/oauth/callback`);
+    
+    redirectUrl.searchParams.set('access_token', tokens.accessToken);
+    if (tokens.refreshToken) {
+      redirectUrl.searchParams.set('refresh_token', tokens.refreshToken);
+    }
+    redirectUrl.searchParams.set('user_id', oauthResult.user.id);
+    redirectUrl.searchParams.set('user_email', oauthResult.user.email);
+    redirectUrl.searchParams.set('user_name', oauthResult.user.name || '');
+    redirectUrl.searchParams.set('success', 'true');
+    redirectUrl.searchParams.set('provider', 'google');
+
+    logger.info('Redirecting to frontend with tokens', { 
+      redirectUrl: redirectUrl.toString().substring(0, 100) + '...' 
+    });
 
     res.redirect(redirectUrl.toString());
+    
   } catch (error) {
-    next(error);
+    logger.error('OAuth callback error:', error);
+    const frontendUrl = process.env.CLIENT_URL || 'http://localhost:3000';
+    res.redirect(`${frontendUrl}/login?error=oauth_failed&message=${error.message}`);
   }
 });
 
 router.get('/oauth/github', (req, res) => {
-  const state = Math.random().toString(36).substring(2);
-  
-  req.session.oauthState = state;
-
-  const params = new URLSearchParams({
-    client_id: process.env.GITHUB_CLIENT_ID,
-    redirect_uri: `${process.env.API_URL}/api/auth/oauth/github/callback`,
-    scope: 'user:email',
-    state,
-  });
-
-  res.redirect(`https://github.com/login/oauth/authorize?${params}`);
-});
-
-router.get('/oauth/github/callback', async (req, res, next) => {
   try {
-    const { code, state, error } = req.query;
-
-    if (error) {
-      return res.redirect(`${process.env.CLIENT_URL}/login?error=oauth_failed`);
+    const state = Math.random().toString(36).substring(2);
+    
+    if (req.session) {
+      req.session.oauthState = state;
     }
 
-    if (state !== req.session.oauthState) {
+    const redirectUri = `${process.env.API_URL}/api/auth/oauth/github/callback`;
+    
+    logger.info('Initiating GitHub OAuth', { state, redirectUri });
+
+    const params = new URLSearchParams({
+      client_id: process.env.GITHUB_CLIENT_ID,
+      redirect_uri: redirectUri,
+      scope: 'user:email',
+      state: state,
+    });
+
+    const authUrl = `https://github.com/login/oauth/authorize?${params}`;
+    logger.info('Redirecting to GitHub OAuth', { authUrl: authUrl.substring(0, 100) + '...' });
+    
+    res.redirect(authUrl);
+  } catch (error) {
+    logger.error('GitHub OAuth initiation error:', error);
+    res.status(500).json({
+      error: 'OAuth initiation failed',
+      code: 'OAUTH_INIT_ERROR'
+    });
+  }
+});
+
+router.get('/oauth/github/callback', async (req, res) => {
+  try {
+    const { code, state, error, error_description } = req.query;
+
+    logger.info('GitHub OAuth callback received', { 
+      hasCode: !!code, 
+      hasState: !!state, 
+      hasError: !!error
+    });
+
+    // Handle OAuth errors from provider
+    if (error) {
+      logger.warn('OAuth error from GitHub:', { error, error_description, state });
+      return res.redirect(`${process.env.CLIENT_URL}/login?error=oauth_denied&message=${error_description || error}`);
+    }
+
+    // Validate state to prevent CSRF
+    if (!state || state !== req.session?.oauthState) {
+      logger.warn('OAuth state mismatch:', { 
+        received: state, 
+        expected: req.session?.oauthState
+      });
       return res.redirect(`${process.env.CLIENT_URL}/login?error=invalid_state`);
     }
 
+    // Validate code exists
+    if (!code) {
+      logger.warn('OAuth callback missing authorization code');
+      return res.redirect(`${process.env.CLIENT_URL}/login?error=missing_code`);
+    }
+
     // Exchange code for tokens
-    const oauthResult = await authService.exchangeOAuthCode('github', code);
+    logger.info('Exchanging GitHub OAuth code for tokens...');
+    const redirectUri = `${process.env.API_URL}/api/auth/oauth/github/callback`;
+    const oauthResult = await authService.exchangeOAuthCode(code, 'github', redirectUri);
 
-    // Clear session
-    req.session.oauthState = null;
+    logger.info('GitHub OAuth exchange successful', { 
+      userId: oauthResult.user?.id,
+      userEmail: oauthResult.user?.email
+    });
 
-    // Redirect to client with tokens
-    const redirectUrl = new URL(`${process.env.CLIENT_URL}/oauth/callback`);
-    redirectUrl.searchParams.set('access_token', oauthResult.access_token);
-    redirectUrl.searchParams.set('refresh_token', oauthResult.refresh_token);
-    redirectUrl.searchParams.set('user', JSON.stringify(oauthResult.user));
+    // Clear session state to prevent reuse
+    if (req.session) {
+      req.session.oauthState = null;
+    }
+
+    // Generate JWT tokens
+    const tokens = oauthResult.tokens;
+    if (!tokens || !tokens.accessToken) {
+      throw new Error('No tokens generated from OAuth exchange');
+    }
+
+    // Redirect to frontend with tokens
+    const frontendUrl = process.env.CLIENT_URL || 'http://localhost:3000';
+    const redirectUrl = new URL(`${frontendUrl}/oauth/callback`);
+    
+    redirectUrl.searchParams.set('access_token', tokens.accessToken);
+    if (tokens.refreshToken) {
+      redirectUrl.searchParams.set('refresh_token', tokens.refreshToken);
+    }
+    redirectUrl.searchParams.set('user_id', oauthResult.user.id);
+    redirectUrl.searchParams.set('user_email', oauthResult.user.email);
+    redirectUrl.searchParams.set('user_name', oauthResult.user.name || '');
+    redirectUrl.searchParams.set('success', 'true');
+    redirectUrl.searchParams.set('provider', 'github');
+
+    logger.info('Redirecting to frontend with tokens', { 
+      redirectUrl: redirectUrl.toString().substring(0, 100) + '...' 
+    });
 
     res.redirect(redirectUrl.toString());
+    
   } catch (error) {
-    next(error);
+    logger.error('GitHub OAuth callback error:', error);
+    const frontendUrl = process.env.CLIENT_URL || 'http://localhost:3000';
+    res.redirect(`${frontendUrl}/login?error=oauth_failed&message=${error.message}`);
   }
 });
 

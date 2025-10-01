@@ -114,6 +114,16 @@ class CryptoUtils {
     }
     return code;
   }
+  // Add missing createHash method for compatibility
+  createHash(algorithm) {
+    return crypto.createHash(algorithm);
+  }
+
+  // Add missing randomBytes method for compatibility
+  randomBytes(size) {
+    return crypto.randomBytes(size);
+  }
+
 }
 
 module.exports = new CryptoUtils();
