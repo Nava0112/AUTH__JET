@@ -133,6 +133,9 @@ class AuthJetApp {
     this.app.use('/oauth', require('./routes/oauth.routes'));
     this.app.use('/auth', require('./routes/oauth.routes'));
 
+    // Dashboard routes
+    this.app.use('/api/dashboard', require('./routes/dashboard.routes'));
+
     // Legacy routes (for backward compatibility)
     this.app.use('/api/auth', authRoutes);
     this.app.use('/api/clients', clientRoutes);

@@ -4,6 +4,8 @@ import { useNavigate } from 'react-router-dom';
 const WorkingClientDashboard = () => {
   const [client, setClient] = useState(null);
   const [stats, setStats] = useState(null);
+  const [applications, setApplications] = useState([]);
+  const [activeTab, setActiveTab] = useState('overview');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const navigate = useNavigate();
@@ -22,16 +24,27 @@ const WorkingClientDashboard = () => {
 
   const fetchDashboardStats = async () => {
     try {
-      const response = await fetch('http://localhost:5000/api/client/dashboard/stats');
-      const data = await response.json();
+      const [statsResponse, appsResponse] = await Promise.all([
+        fetch('http://localhost:5000/api/dashboard/client/stats'),
+        fetch('http://localhost:5000/api/dashboard/client/applications')
+      ]);
       
-      if (response.ok) {
-        setStats(data.stats || data);
-      } else {
-        throw new Error('Failed to fetch stats');
+      const statsData = await statsResponse.json();
+      const appsData = await appsResponse.json();
+      
+      if (statsResponse.ok && statsData.success) {
+        setStats(statsData.stats);
+      }
+      
+      if (appsResponse.ok && appsData.success) {
+        setApplications(appsData.applications);
+      }
+      
+      if (!statsResponse.ok || !appsResponse.ok) {
+        throw new Error('Failed to fetch dashboard data');
       }
     } catch (err) {
-      setError('Failed to load dashboard data');
+      setError('Failed to load dashboard data: ' + err.message);
     } finally {
       setLoading(false);
     }
@@ -122,153 +135,286 @@ const WorkingClientDashboard = () => {
           </div>
         </div>
 
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          <div className="bg-white overflow-hidden shadow rounded-lg">
-            <div className="p-5">
-              <div className="flex items-center">
-                <div className="flex-shrink-0">
-                  <svg className="h-6 w-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                  </svg>
-                </div>
-                <div className="ml-5 w-0 flex-1">
-                  <dl>
-                    <dt className="text-sm font-medium text-gray-500 truncate">Applications</dt>
-                    <dd className="text-lg font-medium text-gray-900">{stats?.totalApplications || 0}</dd>
-                  </dl>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white overflow-hidden shadow rounded-lg">
-            <div className="p-5">
-              <div className="flex items-center">
-                <div className="flex-shrink-0">
-                  <svg className="h-6 w-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z" />
-                  </svg>
-                </div>
-                <div className="ml-5 w-0 flex-1">
-                  <dl>
-                    <dt className="text-sm font-medium text-gray-500 truncate">Total Users</dt>
-                    <dd className="text-lg font-medium text-gray-900">{stats?.totalUsers || 0}</dd>
-                  </dl>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white overflow-hidden shadow rounded-lg">
-            <div className="p-5">
-              <div className="flex items-center">
-                <div className="flex-shrink-0">
-                  <svg className="h-6 w-6 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </div>
-                <div className="ml-5 w-0 flex-1">
-                  <dl>
-                    <dt className="text-sm font-medium text-gray-500 truncate">Status</dt>
-                    <dd className="text-lg font-medium text-green-600">Active</dd>
-                  </dl>
-                </div>
-              </div>
-            </div>
+        {/* Navigation Tabs */}
+        <div className="bg-white shadow rounded-lg mb-8">
+          <div className="border-b border-gray-200">
+            <nav className="-mb-px flex space-x-8 px-6" aria-label="Tabs">
+              <button
+                onClick={() => setActiveTab('overview')}
+                className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                  activeTab === 'overview'
+                    ? 'border-indigo-500 text-indigo-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                📊 Overview
+              </button>
+              <button
+                onClick={() => setActiveTab('applications')}
+                className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                  activeTab === 'applications'
+                    ? 'border-indigo-500 text-indigo-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                🚀 Applications ({stats?.clientApplications || 0})
+              </button>
+            </nav>
           </div>
         </div>
 
+        {/* Tab Content */}
+        {activeTab === 'overview' && (
+          <>
+            {/* Stats Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+              {/* My Applications */}
+              <div className="bg-white overflow-hidden shadow rounded-lg border-l-4 border-blue-500">
+                <div className="p-5">
+                  <div className="flex items-center">
+                    <div className="flex-shrink-0">
+                      <div className="h-8 w-8 bg-blue-500 rounded-full flex items-center justify-center">
+                        <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                        </svg>
+                      </div>
+                    </div>
+                    <div className="ml-5 w-0 flex-1">
+                      <dl>
+                        <dt className="text-sm font-medium text-gray-500 truncate">My Applications</dt>
+                        <dd className="text-2xl font-bold text-gray-900">{stats?.clientApplications || 0}</dd>
+                        <dd className="text-xs text-gray-500">Active apps</dd>
+                      </dl>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Total Users */}
+              <div className="bg-white overflow-hidden shadow rounded-lg border-l-4 border-green-500">
+                <div className="p-5">
+                  <div className="flex items-center">
+                    <div className="flex-shrink-0">
+                      <div className="h-8 w-8 bg-green-500 rounded-full flex items-center justify-center">
+                        <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z" />
+                        </svg>
+                      </div>
+                    </div>
+                    <div className="ml-5 w-0 flex-1">
+                      <dl>
+                        <dt className="text-sm font-medium text-gray-500 truncate">Total Users</dt>
+                        <dd className="text-2xl font-bold text-gray-900">{stats?.totalUsers || 0}</dd>
+                        <dd className="text-xs text-green-600">+{stats?.recentUsers || 0} this week</dd>
+                      </dl>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Auth Modes */}
+              <div className="bg-white overflow-hidden shadow rounded-lg border-l-4 border-purple-500">
+                <div className="p-5">
+                  <div className="flex items-center">
+                    <div className="flex-shrink-0">
+                      <div className="h-8 w-8 bg-purple-500 rounded-full flex items-center justify-center">
+                        <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                        </svg>
+                      </div>
+                    </div>
+                    <div className="ml-5 w-0 flex-1">
+                      <dl>
+                        <dt className="text-sm font-medium text-gray-500 truncate">Auth Modes</dt>
+                        <dd className="text-sm font-medium text-gray-900">
+                          Basic: {stats?.authModes?.basic || 0} | Advanced: {stats?.authModes?.advanced || 0}
+                        </dd>
+                        <dd className="text-xs text-gray-500">Authentication types</dd>
+                      </dl>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Quick Action */}
+              <div className="bg-white overflow-hidden shadow rounded-lg border-l-4 border-orange-500">
+                <div className="p-5">
+                  <div className="flex items-center justify-center h-full">
+                    <button
+                      onClick={() => navigate('/client/create-application')}
+                      className="bg-orange-500 hover:bg-orange-600 text-white px-6 py-3 rounded-md text-sm font-medium transition-colors w-full"
+                    >
+                      ➕ Create App
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Client Overview */}
+            <div className="bg-white shadow rounded-lg mb-8">
+              <div className="px-6 py-4 border-b border-gray-200">
+                <h3 className="text-lg font-medium text-gray-900">Your Applications Overview</h3>
+                <p className="text-sm text-gray-500">Statistics for all your applications and users</p>
+              </div>
+              <div className="p-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="text-center">
+                    <div className="text-3xl font-bold text-blue-600">{stats?.clientApplications || 0}</div>
+                    <div className="text-sm text-gray-500">Applications Created</div>
+                    <div className="text-xs text-gray-500 mt-1">Active and running</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-3xl font-bold text-green-600">{stats?.totalUsers || 0}</div>
+                    <div className="text-sm text-gray-500">Total End Users</div>
+                    <div className="text-xs text-green-600 mt-1">+{stats?.recentUsers || 0} this week</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-3xl font-bold text-purple-600">
+                      {Math.round((stats?.totalUsers || 0) / Math.max(stats?.clientApplications || 1, 1))}
+                    </div>
+                    <div className="text-sm text-gray-500">Avg Users per App</div>
+                    <div className="text-xs text-gray-500 mt-1">Average engagement</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
+        {activeTab === 'applications' && (
+          <>
+            {/* Applications Header */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+              <div className="flex items-center">
+                <div className="flex-shrink-0">
+                  <svg className="h-5 w-5 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0zm-7-4a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM9 9a1 1 0 0 0 0 2v3a1 1 0 0 0 1 1h1a1 1 0 1 0 0-2v-3a1 1 0 0 0-1-1H9z" clipRule="evenodd" />
+                  </svg>
+                </div>
+                <div className="ml-3">
+                  <h3 className="text-sm font-medium text-blue-800">Applications & User Statistics</h3>
+                  <div className="mt-2 text-sm text-blue-700">
+                    <p>You have <strong>{stats?.clientApplications || 0} applications</strong> with a total of <strong>{stats?.totalUsers || 0} users</strong> across all apps.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Applications List */}
+            <div className="bg-white shadow rounded-lg">
+              <div className="px-6 py-4 border-b border-gray-200">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-medium text-gray-900">Your Applications</h3>
+                  <button
+                    onClick={() => navigate('/client/create-application')}
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-md text-sm font-medium"
+                  >
+                    Create New App
+                  </button>
+                </div>
+              </div>
+              <div className="divide-y divide-gray-200">
+                {applications.length === 0 ? (
+                  <div className="p-6 text-center">
+                    <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                    </svg>
+                    <h3 className="mt-2 text-sm font-medium text-gray-900">No applications</h3>
+                    <p className="mt-1 text-sm text-gray-500">Get started by creating your first application.</p>
+                    <div className="mt-6">
+                      <button
+                        onClick={() => navigate('/client/create-application')}
+                        className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700"
+                      >
+                        Create Application
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  applications.map((app) => (
+                    <div key={app.id} className="p-6">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center">
+                          <div className="flex-shrink-0">
+                            <div className="h-10 w-10 bg-indigo-500 rounded-lg flex items-center justify-center">
+                              <span className="text-white font-medium text-sm">
+                                {app.name.charAt(0).toUpperCase()}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="ml-4">
+                            <div className="flex items-center">
+                              <h4 className="text-lg font-medium text-gray-900">{app.name}</h4>
+                              <span className={`ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                app.authMode === 'advanced' 
+                                  ? 'bg-purple-100 text-purple-800' 
+                                  : 'bg-green-100 text-green-800'
+                              }`}>
+                                {app.authMode}
+                              </span>
+                            </div>
+                            <p className="text-sm text-gray-500">{app.description || 'No description'}</p>
+                            <div className="mt-2 flex items-center text-sm text-gray-500">
+                              <svg className="flex-shrink-0 mr-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z" />
+                              </svg>
+                              <span className="font-medium text-indigo-600">{app.userCount} users</span>
+                              <span className="mx-2">•</span>
+                              <span>Created {new Date(app.createdAt).toLocaleDateString()}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center space-x-4">
+                          <div className="text-right">
+                            <div className="text-2xl font-bold text-indigo-600">{app.userCount}</div>
+                            <div className="text-xs text-gray-500">Total Users</div>
+                          </div>
+                          <button className="text-indigo-600 hover:text-indigo-900 text-sm font-medium">
+                            Manage →
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </>
+        )}
+
         {/* Quick Actions */}
-        <div className="bg-white shadow rounded-lg mb-8">
-          <div className="px-4 py-5 sm:p-6">
-            <h3 className="text-lg leading-6 font-medium text-gray-900 mb-4">Quick Actions</h3>
+        <div className="bg-white shadow rounded-lg">
+          <div className="px-6 py-4 border-b border-gray-200">
+            <h3 className="text-lg font-medium text-gray-900">Quick Actions</h3>
+            <p className="text-sm text-gray-500">Manage your applications and settings</p>
+          </div>
+          <div className="p-6">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <button
                 onClick={() => navigate('/client/create-application')}
-                className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-4 py-2 rounded-md text-sm font-medium"
+                className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-4 py-3 rounded-md text-sm font-medium transition-colors"
               >
-                Create App
+                🚀 Create App
               </button>
               <button
-                onClick={() => testEndpoint('applications', 'Applications List')}
-                className="bg-blue-50 hover:bg-blue-100 text-blue-700 px-4 py-2 rounded-md text-sm font-medium"
+                onClick={() => setActiveTab('applications')}
+                className="bg-blue-50 hover:bg-blue-100 text-blue-700 px-4 py-3 rounded-md text-sm font-medium transition-colors"
               >
-                View Apps
+                📱 View Apps
               </button>
               <button
                 onClick={() => testEndpoint('profile', 'Client Profile')}
-                className="bg-green-50 hover:bg-green-100 text-green-700 px-4 py-2 rounded-md text-sm font-medium"
+                className="bg-green-50 hover:bg-green-100 text-green-700 px-4 py-3 rounded-md text-sm font-medium transition-colors"
               >
                 View Profile
               </button>
               <button
                 onClick={() => alert('Analytics feature coming soon!')}
-                className="bg-purple-50 hover:bg-purple-100 text-purple-700 px-4 py-2 rounded-md text-sm font-medium"
+                className="bg-purple-50 hover:bg-purple-100 text-purple-700 px-4 py-3 rounded-md text-sm font-medium transition-colors"
               >
-                Analytics
+                📊 Analytics
               </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Getting Started */}
-        <div className="bg-white shadow rounded-lg">
-          <div className="px-4 py-5 sm:p-6">
-            <h3 className="text-lg leading-6 font-medium text-gray-900 mb-4">Getting Started</h3>
-            <div className="space-y-4">
-              <div className="flex items-start">
-                <div className="flex-shrink-0">
-                  <div className="flex items-center justify-center h-8 w-8 rounded-full bg-indigo-100">
-                    <span className="text-sm font-medium text-indigo-600">1</span>
-                  </div>
-                </div>
-                <div className="ml-4">
-                  <h4 className="text-sm font-medium text-gray-900">Create Your First Application</h4>
-                  <p className="text-sm text-gray-500">Set up an application to start authenticating users</p>
-                </div>
-              </div>
-              
-              <div className="flex items-start">
-                <div className="flex-shrink-0">
-                  <div className="flex items-center justify-center h-8 w-8 rounded-full bg-gray-100">
-                    <span className="text-sm font-medium text-gray-600">2</span>
-                  </div>
-                </div>
-                <div className="ml-4">
-                  <h4 className="text-sm font-medium text-gray-900">Configure Authentication</h4>
-                  <p className="text-sm text-gray-500">Set up login methods and user management</p>
-                </div>
-              </div>
-              
-              <div className="flex items-start">
-                <div className="flex-shrink-0">
-                  <div className="flex items-center justify-center h-8 w-8 rounded-full bg-gray-100">
-                    <span className="text-sm font-medium text-gray-600">3</span>
-                  </div>
-                </div>
-                <div className="ml-4">
-                  <h4 className="text-sm font-medium text-gray-900">Integrate with Your App</h4>
-                  <p className="text-sm text-gray-500">Use our SDKs and APIs to add authentication</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Organization Info */}
-        <div className="mt-8 bg-blue-50 border border-blue-200 rounded-lg p-6">
-          <div className="flex items-center">
-            <svg className="h-5 w-5 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-            </svg>
-            <div className="ml-3">
-              <h3 className="text-sm font-medium text-blue-800">Organization Information</h3>
-              <div className="mt-2 text-sm text-blue-700">
-                <p><strong>Organization:</strong> {client?.organizationName}</p>
-                <p><strong>Contact:</strong> {client?.name} ({client?.email})</p>
-                <p><strong>Plan:</strong> {client?.planType || 'Basic'}</p>
-              </div>
             </div>
           </div>
         </div>
