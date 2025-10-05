@@ -22,9 +22,12 @@ class SimpleClientController {
           email VARCHAR(255) UNIQUE NOT NULL,
           password_hash VARCHAR(255) NOT NULL,
           organization_name VARCHAR(255) NOT NULL,
+          client_id VARCHAR(255) UNIQUE NOT NULL,
+          client_secret VARCHAR(255) NOT NULL,
           plan_type VARCHAR(50) DEFAULT 'basic',
           is_active BOOLEAN DEFAULT true,
-          created_at TIMESTAMP DEFAULT NOW()
+          created_at TIMESTAMP DEFAULT NOW(),
+          updated_at TIMESTAMP DEFAULT NOW()
         );
       `);
 
@@ -40,12 +43,17 @@ class SimpleClientController {
         });
       }
 
+      // Generate unique client credentials
+      const crypto = require('crypto');
+      const clientId = `cli_${crypto.randomBytes(16).toString('hex')}`;
+      const clientSecret = `secret_${crypto.randomBytes(32).toString('hex')}`;
+      
       // Hash password and create client
       const passwordHash = await bcrypt.hash(password, 10);
       
       const result = await database.query(
-        'INSERT INTO clients (name, email, password_hash, organization_name, plan_type) VALUES ($1, $2, $3, $4, $5) RETURNING id, name, email, organization_name, plan_type',
-        [name, email, passwordHash, organizationName, 'basic']
+        'INSERT INTO clients (name, email, password_hash, organization_name, client_id, client_secret, plan_type) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, name, email, organization_name, client_id, client_secret, plan_type',
+        [name, email, passwordHash, organizationName, clientId, clientSecret, 'basic']
       );
 
       const client = result.rows[0];
@@ -60,6 +68,8 @@ class SimpleClientController {
           name: client.name,
           email: client.email,
           organizationName: client.organization_name,
+          clientId: client.client_id,
+          clientSecret: client.client_secret,
           planType: client.plan_type
         }
       });
@@ -194,9 +204,161 @@ class SimpleClientController {
     }
   }
 
-  // Placeholder methods for other endpoints
+  // Get client profile with credentials
   async getProfile(req, res) {
-    res.json({ message: 'Client profile endpoint - working!' });
+    try {
+      // For /api/client/profile route (no ID in URL), we'll use a default client ID
+      // or get it from session/auth. For now, let's use ID 1 as default
+      const id = req.params.id || req.query.id || '1';
+
+      logger.info('Getting client profile for ID:', id);
+      
+      // First, let's see what clients exist
+      const allClients = await database.query('SELECT id, name, email FROM clients LIMIT 10');
+      logger.info('Available clients in database:', allClients.rows);
+      
+      // If no clients exist and ID is 1, create a test client
+      if (allClients.rows.length === 0 && id === '1') {
+        logger.info('No clients found, creating test client...');
+        
+        const crypto = require('crypto');
+        const testClientId = `cli_${crypto.randomBytes(16).toString('hex')}`;
+        const testClientSecret = `secret_${crypto.randomBytes(32).toString('hex')}`;
+        
+        await database.query(`
+          INSERT INTO clients (id, name, email, password_hash, organization_name, client_id, client_secret, plan_type)
+          VALUES (1, 'Test Client', 'test@example.com', 'dummy_hash', 'Test Organization', $1, $2, 'basic')
+        `, [testClientId, testClientSecret]);
+        
+        // Try the query again
+        const retryResult = await database.query(
+          `SELECT id, name, email, organization_name, plan_type, 
+                  client_id, client_secret, created_at, updated_at, last_login
+           FROM clients 
+           WHERE id = $1`,
+          [id]
+        );
+        
+        if (retryResult.rows.length > 0) {
+          const client = retryResult.rows[0];
+          
+          logger.info('Auto-created client credentials:', {
+            clientId: client.client_id,
+            hasSecret: !!client.client_secret
+          });
+
+          return res.json({
+            client: {
+              id: client.id,
+              name: client.name,
+              contact_email: client.email,
+              organization_name: client.organization_name,
+              description: client.organization_name,
+              website: client.organization_name,
+              plan_type: client.plan_type || 'basic',
+              status: 'active',
+              api_key: client.client_id,
+              client_id: client.client_id,
+              client_secret: client.client_secret,
+              secret_key: client.client_secret,
+              created_at: client.created_at,
+              updated_at: client.updated_at,
+              last_login: client.last_login,
+              redirect_urls: ['https://localhost:3000/auth/callback'],
+              allowed_origins: ['https://localhost:3000'],
+              webhook_url: null
+            }
+          });
+        }
+      }
+
+      // Query the client data including credentials
+      const result = await database.query(
+        `SELECT id, name, email, organization_name, plan_type, 
+                client_id, client_secret, created_at, updated_at, last_login
+         FROM clients 
+         WHERE id = $1`,
+        [id]
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({
+          error: 'Client not found',
+          code: 'CLIENT_NOT_FOUND'
+        });
+      }
+
+      const client = result.rows[0];
+
+      // Check if client has credentials, generate if missing
+      let clientId = client.client_id;
+      let clientSecret = client.client_secret;
+      
+      if (!clientId || !clientSecret) {
+        logger.info('Client missing credentials, generating new ones...');
+        
+        const crypto = require('crypto');
+        clientId = clientId || `cli_${crypto.randomBytes(16).toString('hex')}`;
+        clientSecret = clientSecret || `secret_${crypto.randomBytes(32).toString('hex')}`;
+        
+        // Update database with new credentials
+        await database.query(`
+          UPDATE clients 
+          SET client_id = $1, client_secret = $2, updated_at = NOW()
+          WHERE id = $3
+        `, [clientId, clientSecret, client.id]);
+        
+        logger.info('Generated and saved new credentials for client:', {
+          clientId,
+          clientName: client.name
+        });
+      }
+
+      // Use actual stored credentials from database
+      logger.info('Retrieved stored credentials for client:', {
+        clientId: clientId,
+        hasSecret: !!clientSecret,
+        secretLength: clientSecret?.length
+      });
+
+      const responseData = {
+        client: {
+          id: client.id,
+          name: client.name,
+          contact_email: client.email,
+          organization_name: client.organization_name,
+          description: client.organization_name,
+          website: client.organization_name,
+          plan_type: client.plan_type || 'basic',
+          status: 'active',
+          api_key: clientId,
+          client_id: clientId,
+          client_secret: clientSecret,
+          secret_key: clientSecret,
+          created_at: client.created_at,
+          updated_at: client.updated_at,
+          last_login: client.last_login,
+          redirect_urls: ['https://localhost:3000/auth/callback'],
+          allowed_origins: ['https://localhost:3000'],
+          webhook_url: null
+        }
+      };
+
+      logger.info('Sending client profile response:', {
+        hasClientSecret: !!responseData.client.client_secret,
+        clientSecretLength: responseData.client.client_secret?.length
+      });
+
+      // Return client profile with credentials
+      res.json(responseData);
+
+    } catch (error) {
+      logger.error('Get client profile error:', error);
+      res.status(500).json({
+        error: 'Failed to fetch client profile',
+        details: error.message
+      });
+    }
   }
 
   async forgotPassword(req, res) {
@@ -226,35 +388,62 @@ class SimpleClientController {
   // Application management placeholders
   async getApplications(req, res) {
     try {
-      // For now, get all applications (in real implementation, filter by client_id)
+      // For now, return clients instead of applications to match the UI
       const result = await database.query(`
-        SELECT id, name, description, auth_mode, allowed_origins, 
-               webhook_url, is_active, created_at
-        FROM client_applications 
-        WHERE is_active = true
+        SELECT id, name, email as contact_email, organization_name as website,
+               client_id, plan_type, created_at, updated_at
+        FROM clients 
         ORDER BY created_at DESC
       `);
 
-      const applications = result.rows.map(app => ({
-        id: app.id,
-        name: app.name,
-        description: app.description,
-        authMode: app.auth_mode,
-        allowedOrigins: app.allowed_origins,
-        webhookUrl: app.webhook_url,
-        isActive: app.is_active,
-        createdAt: app.created_at
-      }));
+      // If no clients exist, create a sample one
+      if (result.rows.length === 0) {
+        logger.info('No clients found, creating sample client...');
+        
+        const crypto = require('crypto');
+        const sampleClientId = `cli_${crypto.randomBytes(16).toString('hex')}`;
+        const sampleClientSecret = `secret_${crypto.randomBytes(32).toString('hex')}`;
+        
+        await database.query(`
+          INSERT INTO clients (name, email, password_hash, organization_name, client_id, client_secret, plan_type)
+          VALUES ('Sample Client', 'sample@example.com', 'dummy_hash', 'Sample Organization', $1, $2, 'basic')
+        `, [sampleClientId, sampleClientSecret]);
+        
+        // Query again
+        const retryResult = await database.query(`
+          SELECT id, name, email as contact_email, organization_name as website,
+                 client_id, plan_type, created_at, updated_at
+          FROM clients 
+          ORDER BY created_at DESC
+        `);
+        
+        const clients = retryResult.rows;
+        return res.json({
+          clients: clients,
+          pagination: {
+            page: 1,
+            limit: 10,
+            total: clients.length,
+            pages: 1
+          }
+        });
+      }
 
+      const clients = result.rows;
+      
       res.json({
-        success: true,
-        applications: applications,
-        count: applications.length
+        clients: clients,
+        pagination: {
+          page: 1,
+          limit: 10,
+          total: clients.length,
+          pages: Math.ceil(clients.length / 10)
+        }
       });
     } catch (error) {
-      logger.error('Get applications error:', error);
+      logger.error('Get clients error:', error);
       res.status(500).json({ 
-        error: 'Failed to fetch applications',
+        error: 'Failed to fetch clients',
         details: error.message 
       });
     }

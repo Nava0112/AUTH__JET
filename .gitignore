@@ -40,7 +40,6 @@ tmp/
 temp/
 
 
-
 *.md
 
 backend/database.json

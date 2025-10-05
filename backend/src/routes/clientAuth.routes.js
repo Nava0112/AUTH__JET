@@ -20,6 +20,7 @@ router.post('/verify-email', clientAuthController.verifyEmail);
 
 // Client profile management
 router.get('/profile', clientAuthController.getProfile);
+router.get('/profile/:id', clientAuthController.getProfile); // Alternative route with ID
 router.put('/profile', clientAuthController.updateProfile);
 router.post('/change-password', clientAuthController.changePassword);
 router.post('/logout', clientAuthController.logout);
