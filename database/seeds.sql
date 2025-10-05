@@ -49,7 +49,7 @@ INSERT INTO clients (
     '{
         "webhook_url": "https://api.example-store.com/auth/webhook",
         "webhook_secret": "eco_webhook_secret_654321",
-        "max_users": 50000,
+        "max_users": 80000,
         "session_timeout": 7200,
         "branding": {
             "logo": "https://example-store.com/logo.png",

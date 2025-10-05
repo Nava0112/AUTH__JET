@@ -6,7 +6,7 @@ class WebhookService {
   constructor() {
     this.circuitBreakers = new Map();
     this.maxRetries = 3;
-    this.timeout = 5000; // 5 seconds
+    this.timeout = 8000; // 5 seconds
   }
 
   getCircuitBreaker(clientId) {

@@ -227,7 +227,7 @@ npm install
 ### Configuration
 Create `.env`:
 ```bash
-REACT_APP_API_URL=http://localhost:5000
+REACT_APP_API_URL=http://localhost:8000
 ```
 
 ### Start Development Server

@@ -43,7 +43,7 @@ DB_USER=postgres
 DB_PASSWORD=your_postgres_password
 
 # Server
-PORT=5000
+PORT=8000
 NODE_ENV=development
 
 # Session (for OAuth)
@@ -94,7 +94,7 @@ npm start
 Test the health endpoint:
 
 ```bash
-curl http://localhost:5000/health
+curl http://localhost:8000/health
 ```
 
 Expected response:
@@ -109,7 +109,7 @@ Expected response:
 
 Test the JWKS endpoint:
 ```bash
-curl http://localhost:5000/.well-known/jwks.json
+curl http://localhost:8000/.well-known/jwks.json
 ```
 
 ## 7. Database Seeding (Optional)
@@ -136,11 +136,11 @@ psql -U postgres -d authjet -f ../database/seeds.sql
 2. Or kill the process using the port:
    ```bash
    # Windows
-   netstat -ano | findstr :5000
+   netstat -ano | findstr :8000
    taskkill /PID <PID> /F
    
    # Linux/Mac
-   lsof -ti:5000 | xargs kill
+   lsof -ti:8000 | xargs kill
    ```
 
 ### Issue: "Missing dependencies"

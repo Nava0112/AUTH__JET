@@ -9,12 +9,18 @@ const session = require('express-session');
 const database = require('./utils/database');
 const logger = require('./utils/logger');
 const errorHandler = require('./middleware/errorHandler');
+const oauthService = require('./services/oauth.service');
 
 // Route imports
 const authRoutes = require('./routes/auth.routes');
 const clientRoutes = require('./routes/client.routes');
 const userRoutes = require('./routes/user.routes');
 const webhookRoutes = require('./routes/webhook.routes');
+
+// New multi-tenant routes
+const adminRoutes = require('./routes/admin.routes');
+const clientAuthRoutes = require('./routes/clientAuth.routes');
+const userAuthRoutes = require('./routes/userAuth.routes');
 
 class AuthJetApp {
   constructor() {
@@ -60,8 +66,9 @@ class AuthJetApp {
     // CORS with dynamic origin validation
     this.app.use(cors({
       origin: (origin, callback) => {
-        const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || [];
-        if (!origin || allowedOrigins.includes(origin)) {
+        const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000', 'http://localhost:3001'];
+        // Allow requests with no origin (mobile apps, curl, etc.)
+        if (!origin || allowedOrigins.includes(origin) || process.env.NODE_ENV === 'development') {
           callback(null, true);
         } else {
           callback(new Error('Not allowed by CORS'));
@@ -110,6 +117,10 @@ class AuthJetApp {
 
     // Compression
     this.app.use(compression());
+
+    // Initialize OAuth service
+    this.app.use(oauthService.getPassportMiddleware());
+    this.app.use(oauthService.getPassportSession());
   }
 
   setupRoutes() {
@@ -123,11 +134,28 @@ class AuthJetApp {
       });
     });
 
+    // OAuth 2.0 routes
+    this.app.use('/oauth', require('./routes/oauth.routes'));
+    this.app.use('/auth', require('./routes/oauth.routes'));
+    
+    // Social OAuth routes
+    this.app.use('/api/auth', require('./routes/socialAuth.routes'));
+
+    // Dashboard routes
+    this.app.use('/api/dashboard', require('./routes/dashboard.routes'));
+
+    // Legacy routes (for backward compatibility)
     this.app.use('/api/auth', authRoutes);
     this.app.use('/api/clients', clientRoutes);
     this.app.use('/api/users', userRoutes);
     this.app.use('/api/webhooks', webhookRoutes);
+    
     this.app.use('/api/analytics', require('./routes/analytics.routes'));
+
+    // New multi-tenant routes
+    this.app.use('/api/admin', adminRoutes);
+    this.app.use('/api/client', clientAuthRoutes);
+    this.app.use('/api/user', userAuthRoutes);
 
     // JWKS endpoint
     this.app.get('/.well-known/jwks.json', (req, res) => {
@@ -159,7 +187,7 @@ class AuthJetApp {
       await database.connect();
       logger.info('Database connected successfully');
 
-      const PORT = process.env.PORT || 5000;
+      const PORT = process.env.PORT || 8000;
       this.server = this.app.listen(PORT, () => {
         logger.info(`AuthJet server running on port ${PORT}`);
         logger.info(`Environment: ${process.env.NODE_ENV}`);

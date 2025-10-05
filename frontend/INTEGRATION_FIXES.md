@@ -175,7 +175,7 @@ The frontend package.json wasn't visible in the file reads, so dependencies coul
 ### 4. Environment Variables
 Frontend needs `.env` file with:
 ```bash
-REACT_APP_API_URL=http://localhost:5000
+REACT_APP_API_URL=http://localhost:8000
 ```
 
 ---
@@ -185,7 +185,7 @@ REACT_APP_API_URL=http://localhost:5000
 ### Before Running
 - [ ] Install dependencies: `npm install`
 - [ ] Create `.env` file with `REACT_APP_API_URL`
-- [ ] Ensure backend is running on correct port (5000)
+- [ ] Ensure backend is running on correct port (8000)
 
 ### Functional Tests
 - [ ] Login page loads
@@ -314,7 +314,7 @@ The frontend codebase is now fully integrated with:
 
 ### API calls get 404
 - **Cause:** Backend not running or wrong API URL
-- **Fix:** Check backend is running on `http://localhost:5000`
+- **Fix:** Check backend is running on `http://localhost:8000`
 
 ### Token not being sent with requests
 - **Cause:** Auth interceptor issue

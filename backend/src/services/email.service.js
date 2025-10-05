@@ -1,4 +1,5 @@
 const logger = require('../utils/logger');
+const nodemailer = require('nodemailer');
 
 class EmailService {
   constructor() {
@@ -6,18 +7,35 @@ class EmailService {
   }
 
   createTransporter() {
-    // In a real implementation, you would configure nodemailer or similar
-    // For now, we'll log emails instead of actually sending them
-    return {
-      sendMail: (mailOptions) => {
-        logger.info('EMAIL SENT:', {
-          to: mailOptions.to,
-          subject: mailOptions.subject,
-          // Don't log the full HTML content for security
-        });
-        return Promise.resolve({ messageId: 'mock-message-id' });
+    // Check if SMTP is configured
+    if (!process.env.SMTP_HOST || !process.env.SMTP_USER) {
+      logger.warn('SMTP not configured, emails will be logged only');
+      return {
+        sendMail: (mailOptions) => {
+          logger.info('EMAIL WOULD BE SENT:', {
+            to: mailOptions.to,
+            subject: mailOptions.subject,
+            // Don't log the full HTML content for security
+          });
+          return Promise.resolve({ messageId: 'mock-message-id' });
+        },
+      };
+    }
+
+    // Create real nodemailer transporter
+    return nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: parseInt(process.env.SMTP_PORT || '587'),
+      secure: process.env.SMTP_SECURE === 'true', // true for 465, false for other ports
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASSWORD,
       },
-    };
+      tls: {
+        // Do not fail on invalid certs for Gmail
+        rejectUnauthorized: false
+      }
+    });
   }
 
   async sendWelcomeEmail(email, clientName) {
@@ -243,6 +261,31 @@ class EmailService {
       logger.info('Password reset email sent successfully', { email, clientName });
     } catch (error) {
       logger.error('Failed to send password reset email:', error);
+      throw error;
+    }
+  }
+
+  // Generic send method used by admin controller
+  async send(mailOptions) {
+    try {
+      const result = await this.transporter.sendMail({
+        ...mailOptions,
+        from: mailOptions.from || process.env.EMAIL_FROM || 'noreply@authjet.com',
+      });
+      
+      logger.info('Email sent successfully', { 
+        to: mailOptions.to, 
+        subject: mailOptions.subject,
+        messageId: result.messageId 
+      });
+      
+      return result;
+    } catch (error) {
+      logger.error('Failed to send email:', {
+        error: error.message,
+        to: mailOptions.to,
+        subject: mailOptions.subject
+      });
       throw error;
     }
   }

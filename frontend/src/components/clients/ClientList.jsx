@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { apiService } from '../../services/api';
 import Loading from '../common/Loading';
+import ClientProfileModal from './ClientProfileModal';
 
 const ClientList = () => {
   const [clients, setClients] = useState([]);
@@ -10,6 +11,8 @@ const ClientList = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [pagination, setPagination] = useState({});
+  const [selectedClient, setSelectedClient] = useState(null);
+  const [showProfileModal, setShowProfileModal] = useState(false);
 
   const fetchClients = async (page = 1, search = '') => {
     try {
@@ -71,6 +74,16 @@ const ClientList = () => {
         {plan.charAt(0).toUpperCase() + plan.slice(1)}
       </span>
     );
+  };
+
+  const handleViewProfile = (client) => {
+    setSelectedClient(client);
+    setShowProfileModal(true);
+  };
+
+  const closeProfileModal = () => {
+    setShowProfileModal(false);
+    setSelectedClient(null);
   };
 
   if (isLoading && clients.length === 0) {
@@ -173,6 +186,12 @@ const ClientList = () => {
                       </div>
                     </div>
                     <div className="flex items-center space-x-2">
+                      <button
+                        onClick={() => handleViewProfile(client)}
+                        className="text-green-600 hover:text-green-900 text-sm font-medium"
+                      >
+                        View Profile
+                      </button>
                       <Link
                         to={`/clients/${client.id}`}
                         className="text-indigo-600 hover:text-indigo-900 text-sm font-medium"
@@ -237,6 +256,13 @@ const ClientList = () => {
             </div>
           )}
         </>
+      )}
+      {showProfileModal && selectedClient && (
+        <ClientProfileModal
+          client={selectedClient}
+          isOpen={showProfileModal}
+          onClose={closeProfileModal}
+        />
       )}
     </div>
   );
