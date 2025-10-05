@@ -10,7 +10,7 @@ const SetupStatus = () => {
 
   const checkBackendStatus = async () => {
     try {
-      const response = await fetch('http://localhost:5000/health');
+      const response = await fetch('http://localhost:8000/health');
       if (response.ok) {
         setBackendStatus('running');
         const data = await response.json();
@@ -76,7 +76,7 @@ const SetupStatus = () => {
               <div className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
                 <div>
                   <h3 className="text-lg font-medium text-gray-900">Backend API</h3>
-                  <p className="text-sm text-gray-500">Node.js server on port 5000</p>
+                  <p className="text-sm text-gray-500">Node.js server on port 8000</p>
                 </div>
                 <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(backendStatus)}`}>
                   {getStatusText(backendStatus)}

@@ -25,8 +25,8 @@ const WorkingClientDashboard = () => {
   const fetchDashboardStats = async () => {
     try {
       const [statsResponse, appsResponse] = await Promise.all([
-        fetch('http://localhost:5000/api/dashboard/client/stats'),
-        fetch('http://localhost:5000/api/dashboard/client/applications')
+        fetch('http://localhost:8000/api/dashboard/client/stats'),
+        fetch('http://localhost:8000/api/dashboard/client/applications')
       ]);
       
       const statsData = await statsResponse.json();
@@ -57,7 +57,7 @@ const WorkingClientDashboard = () => {
 
   const testEndpoint = async (endpoint, name) => {
     try {
-      const response = await fetch(`http://localhost:5000/api/client/${endpoint}`);
+      const response = await fetch(`http://localhost:8000/api/client/${endpoint}`);
       const data = await response.json();
       alert(`${name} Response:\n${JSON.stringify(data, null, 2)}`);
     } catch (err) {

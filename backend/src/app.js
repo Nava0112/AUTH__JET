@@ -9,6 +9,7 @@ const session = require('express-session');
 const database = require('./utils/database');
 const logger = require('./utils/logger');
 const errorHandler = require('./middleware/errorHandler');
+const oauthService = require('./services/oauth.service');
 
 // Route imports
 const authRoutes = require('./routes/auth.routes');
@@ -116,6 +117,10 @@ class AuthJetApp {
 
     // Compression
     this.app.use(compression());
+
+    // Initialize OAuth service
+    this.app.use(oauthService.getPassportMiddleware());
+    this.app.use(oauthService.getPassportSession());
   }
 
   setupRoutes() {
@@ -132,6 +137,9 @@ class AuthJetApp {
     // OAuth 2.0 routes
     this.app.use('/oauth', require('./routes/oauth.routes'));
     this.app.use('/auth', require('./routes/oauth.routes'));
+    
+    // Social OAuth routes
+    this.app.use('/api/auth', require('./routes/socialAuth.routes'));
 
     // Dashboard routes
     this.app.use('/api/dashboard', require('./routes/dashboard.routes'));
@@ -179,7 +187,7 @@ class AuthJetApp {
       await database.connect();
       logger.info('Database connected successfully');
 
-      const PORT = process.env.PORT || 5000;
+      const PORT = process.env.PORT || 8000;
       this.server = this.app.listen(PORT, () => {
         logger.info(`AuthJet server running on port ${PORT}`);
         logger.info(`Environment: ${process.env.NODE_ENV}`);

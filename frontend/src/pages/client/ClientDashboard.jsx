@@ -11,6 +11,19 @@ const ClientDashboard = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
+    // Check for OAuth callback tokens in URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('token');
+    const name = urlParams.get('name');
+    
+    if (token && name) {
+      // Store OAuth client data in localStorage for clientAuthService
+      localStorage.setItem('client_token', token);
+      
+      // Clean URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+    
     loadDashboardData();
   }, []);
 

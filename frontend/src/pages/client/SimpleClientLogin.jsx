@@ -29,7 +29,7 @@ const SimpleClientLogin = () => {
       }
 
       // Call the working backend API
-      const response = await fetch('http://localhost:5000/api/client/login', {
+      const response = await fetch('http://localhost:8000/api/client/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -186,7 +186,7 @@ const SimpleClientLogin = () => {
             >
               View System Status →
             </a>
-            <span className="text-xs text-green-500">API: http://localhost:5000</span>
+            <span className="text-xs text-green-500">API: http://localhost:8000</span>
           </div>
         </div>
       </div>

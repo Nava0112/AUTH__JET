@@ -6,7 +6,8 @@ const WorkingAdminRegister = () => {
     name: '',
     email: '',
     password: '',
-    confirmPassword: ''
+    confirmPassword: '',
+    justification: ''
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -28,8 +29,8 @@ const WorkingAdminRegister = () => {
 
     try {
       // Validation
-      if (!formData.name || !formData.email || !formData.password || !formData.confirmPassword) {
-        throw new Error('Please fill in all fields');
+      if (!formData.name || !formData.email || !formData.password || !formData.confirmPassword || !formData.justification) {
+        throw new Error('Please fill in all fields including justification');
       }
 
       if (formData.password !== formData.confirmPassword) {
@@ -41,7 +42,7 @@ const WorkingAdminRegister = () => {
       }
 
       // Call the working backend API
-      const response = await fetch('http://localhost:5000/api/admin/register', {
+      const response = await fetch('http://localhost:8000/api/admin/register', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -49,25 +50,32 @@ const WorkingAdminRegister = () => {
         body: JSON.stringify({
           name: formData.name,
           email: formData.email,
-          password: formData.password
+          password: formData.password,
+          justification: formData.justification
         })
       });
 
       const data = await response.json();
 
       if (response.ok && data.success) {
-        setSuccess(`Admin account created successfully! Welcome, ${data.admin.name}!`);
+        setSuccess(data.message + ' ' + (data.note || ''));
         
-        // Store admin info
-        localStorage.setItem('admin', JSON.stringify(data.admin));
+        // Clear the form
+        setFormData({
+          name: '',
+          email: '',
+          password: '',
+          confirmPassword: '',
+          justification: ''
+        });
         
-        // Redirect to admin dashboard after a short delay
+        // Redirect to login page after a delay
         setTimeout(() => {
-          navigate('/admin/dashboard');
-        }, 2000);
+          navigate('/admin/login?message=request_submitted');
+        }, 5000);
         
       } else {
-        throw new Error(data.error || 'Registration failed');
+        throw new Error(data.error || 'Registration request failed');
       }
       
     } catch (err) {
@@ -87,10 +95,10 @@ const WorkingAdminRegister = () => {
             </svg>
           </div>
           <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-            Create Admin Account
+            Request Admin Access
           </h2>
           <p className="mt-2 text-center text-sm text-gray-600">
-            Set up your platform administrator account
+            Submit a request for platform administrator access
           </p>
         </div>
         
@@ -172,6 +180,22 @@ const WorkingAdminRegister = () => {
                 onChange={handleChange}
               />
             </div>
+            
+            <div>
+              <label htmlFor="justification" className="block text-sm font-medium text-gray-700">
+                Justification for Admin Access
+              </label>
+              <textarea
+                id="justification"
+                name="justification"
+                rows={4}
+                required
+                className="mt-1 appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-red-500 focus:border-red-500 sm:text-sm"
+                placeholder="Please explain why you need admin access to the platform..."
+                value={formData.justification}
+                onChange={handleChange}
+              />
+            </div>
           </div>
 
           <div>
@@ -186,7 +210,7 @@ const WorkingAdminRegister = () => {
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
               ) : null}
-              {loading ? 'Creating Account...' : 'Create Admin Account'}
+              {loading ? 'Submitting Request...' : 'Request Admin Access'}
             </button>
           </div>
 
@@ -211,12 +235,12 @@ const WorkingAdminRegister = () => {
           </div>
         </form>
         
-        <div className="mt-8 p-4 bg-yellow-50 border border-yellow-200 rounded-md">
-          <p className="text-sm text-yellow-800">
-            <strong>⚠️ First Admin:</strong> This creates your platform administrator account.
+        <div className="mt-8 p-4 bg-blue-50 border border-blue-200 rounded-md">
+          <p className="text-sm text-blue-800">
+            <strong>🔐 Admin Access Request:</strong> This submits a request for administrator privileges.
           </p>
-          <p className="text-xs text-yellow-600 mt-2">
-            You'll have full access to manage client organizations, applications, and platform settings.
+          <p className="text-xs text-blue-600 mt-2">
+            Your request will be reviewed by the system administrator. You will be notified once your request is approved or rejected.
           </p>
         </div>
       </div>

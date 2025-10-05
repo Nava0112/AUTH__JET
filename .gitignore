@@ -47,23 +47,6 @@ backend/database.json
 
 backend/.env
 backend/.env.backup
-backend/fixed-migrations.js
-
-backend/verify-client.js
-backend/setup-supabase.js
-backend/fix-env.js
-backend/fix-crypto.js
-backend/OAUTH_SETUP.md
-backend/check-auth-flow.js
-backend/check-schema.js
-backend/create-users-view.js
-backend/verify-database.js
-backend/test-oauth-ready.js
-backend/verify-oauth.js
-backend/test-oauth-final.js
-backend/test-auth-flows.js
-backend/fix-supabase-schema.js
-
 .env
 .env.local
 .env.production

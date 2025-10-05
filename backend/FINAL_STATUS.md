@@ -262,8 +262,8 @@ npm start
 
 ### 6. Verify
 ```bash
-curl http://localhost:5000/health
-curl http://localhost:5000/.well-known/jwks.json
+curl http://localhost:8000/health
+curl http://localhost:8000/.well-known/jwks.json
 ```
 
 ---

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { getUserFromToken, isTokenExpired, getLoginMethodDisplay } from '../../utils/tokenUtils';
 
 const WorkingAdminDashboard = () => {
   const [admin, setAdmin] = useState(null);
@@ -9,6 +10,42 @@ const WorkingAdminDashboard = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
+    // Check for OAuth callback tokens in URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('token');
+    const name = urlParams.get('name');
+    
+    if (token && name) {
+      // Extract user info from JWT token
+      const userInfo = getUserFromToken(token);
+      
+      if (userInfo && userInfo.type === 'admin') {
+        const adminData = {
+          ...userInfo,
+          token: token,
+          loginMethod: userInfo.provider
+        };
+        localStorage.setItem('admin', JSON.stringify(adminData));
+        setAdmin(adminData);
+        
+        // Clean URL
+        window.history.replaceState({}, document.title, window.location.pathname);
+        
+        // Show success message for OAuth login
+        console.log('✅ OAuth login successful:', {
+          email: userInfo.email,
+          provider: getLoginMethodDisplay(userInfo.provider)
+        });
+        
+        fetchDashboardStats();
+        return;
+      } else {
+        console.error('❌ Invalid token or not an admin token');
+        navigate('/admin/login?error=invalid_token');
+        return;
+      }
+    }
+    
     // Check if admin is logged in
     const adminData = localStorage.getItem('admin');
     if (!adminData) {
@@ -16,13 +53,54 @@ const WorkingAdminDashboard = () => {
       return;
     }
     
-    setAdmin(JSON.parse(adminData));
-    fetchDashboardStats();
+    try {
+      const parsedAdminData = JSON.parse(adminData);
+      
+      // Validate token if it exists
+      if (parsedAdminData.token) {
+        if (isTokenExpired(parsedAdminData.token)) {
+          console.log('🔄 Token expired, redirecting to login');
+          localStorage.removeItem('admin');
+          navigate('/admin/login?error=token_expired');
+          return;
+        }
+        
+        // Extract fresh user info from token
+        const userInfo = getUserFromToken(parsedAdminData.token);
+        if (userInfo && userInfo.type === 'admin') {
+          const refreshedAdminData = {
+            ...userInfo,
+            token: parsedAdminData.token,
+            loginMethod: userInfo.provider
+          };
+          setAdmin(refreshedAdminData);
+          
+          console.log('✅ Valid admin session:', {
+            email: userInfo.email,
+            provider: getLoginMethodDisplay(userInfo.provider)
+          });
+        } else {
+          console.log('❌ Invalid admin token');
+          localStorage.removeItem('admin');
+          navigate('/admin/login?error=invalid_session');
+          return;
+        }
+      } else {
+        // Legacy admin data without token
+        setAdmin(parsedAdminData);
+      }
+      
+      fetchDashboardStats();
+    } catch (error) {
+      console.error('❌ Error parsing admin data:', error);
+      localStorage.removeItem('admin');
+      navigate('/admin/login?error=session_error');
+    }
   }, [navigate]);
 
   const fetchDashboardStats = async () => {
     try {
-      const response = await fetch('http://localhost:5000/api/dashboard/admin/stats');
+      const response = await fetch('http://localhost:8000/api/dashboard/admin/stats');
       const data = await response.json();
       
       if (response.ok && data.success) {
@@ -44,7 +122,7 @@ const WorkingAdminDashboard = () => {
 
   const testEndpoint = async (endpoint, name) => {
     try {
-      const response = await fetch(`http://localhost:5000/api/admin/${endpoint}`);
+      const response = await fetch(`http://localhost:8000/api/admin/${endpoint}`);
       const data = await response.json();
       alert(`${name} Response:\n${JSON.stringify(data, null, 2)}`);
     } catch (err) {
@@ -261,7 +339,7 @@ const WorkingAdminDashboard = () => {
                 <h4 className="text-sm font-medium text-gray-500 mb-2">Backend Status</h4>
                 <div className="flex items-center">
                   <div className="h-2 w-2 bg-green-400 rounded-full mr-2"></div>
-                  <span className="text-sm text-gray-900">Connected to http://localhost:5000</span>
+                  <span className="text-sm text-gray-900">Connected to http://localhost:8000</span>
                 </div>
               </div>
               <div>

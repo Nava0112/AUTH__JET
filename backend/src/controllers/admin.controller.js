@@ -1,4 +1,5 @@
 const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
 const crypto = require('../utils/crypto');
 const database = require('../utils/database');
 const logger = require('../utils/logger');
@@ -6,7 +7,7 @@ const jwtService = require('../services/jwt.service');
 const emailService = require('../services/email.service');
 class AdminController {
   async register(req, res, next) {
-    const { email, password, name } = req.body;
+    const { email, password, name, justification } = req.body;
     
     try {
       // Validation
@@ -24,36 +25,36 @@ class AdminController {
         });
       }
 
-      // Create admins table if it doesn't exist
+      // Create admin_requests table if it doesn't exist
       await database.query(`
-        CREATE TABLE IF NOT EXISTS admins (
+        CREATE TABLE IF NOT EXISTS admin_requests (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           email VARCHAR(255) UNIQUE NOT NULL,
           password_hash VARCHAR(255) NOT NULL,
           name VARCHAR(255) NOT NULL,
-          role VARCHAR(50) DEFAULT 'admin',
-          is_active BOOLEAN DEFAULT true,
-          last_login TIMESTAMP,
+          justification TEXT,
+          status VARCHAR(20) DEFAULT 'pending',
+          requested_at TIMESTAMP DEFAULT NOW(),
+          reviewed_at TIMESTAMP,
+          reviewed_by UUID,
           created_at TIMESTAMP DEFAULT NOW(),
           updated_at TIMESTAMP DEFAULT NOW()
         );
       `);
 
-      // Create sessions table if it doesn't exist
-      await database.query(`
-        CREATE TABLE IF NOT EXISTS sessions (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          admin_id UUID,
-          client_id UUID,
-          user_id UUID,
-          session_type VARCHAR(20) NOT NULL,
-          refresh_token VARCHAR(500) NOT NULL,
-          expires_at TIMESTAMP NOT NULL,
-          revoked BOOLEAN DEFAULT false,
-          revoked_at TIMESTAMP,
-          created_at TIMESTAMP DEFAULT NOW()
-        );
-      `);
+      // Check if request already exists
+      const existingRequest = await database.query(
+        'SELECT id, status FROM admin_requests WHERE email = $1',
+        [email.toLowerCase()]
+      );
+
+      if (existingRequest.rows.length > 0) {
+        const request = existingRequest.rows[0];
+        return res.status(409).json({
+          error: `Admin request already exists with status: ${request.status}`,
+          code: 'REQUEST_EXISTS',
+        });
+      }
 
       // Check if admin already exists
       const existingAdmin = await database.query(
@@ -68,68 +69,100 @@ class AdminController {
         });
       }
 
-      // Hash password
+      // Hash password for storage
       const passwordHash = await bcrypt.hash(password, 12);
 
-      // Create admin
+      // Create admin request
       const query = `
-        INSERT INTO admins (email, password_hash, name, role, is_active)
-        VALUES ($1, $2, $3, $4, $5)
-        RETURNING id, email, name, role, is_active, created_at
+        INSERT INTO admin_requests (email, password_hash, name, justification)
+        VALUES ($1, $2, $3, $4)
+        RETURNING id, email, name, requested_at
       `;
 
       const result = await database.query(query, [
         email.toLowerCase(),
         passwordHash,
         name,
-        'admin',
-        true,
+        justification || 'No justification provided'
       ]);
 
-      const admin = result.rows[0];
+      const request = result.rows[0];
 
-      // Generate tokens
-      const accessToken = await jwtService.generateAccessToken({
-        id: admin.id,
-        email: admin.email,
-        role: admin.role,
-        type: 'admin',
+      // Send approval email to super admin
+      const superAdminEmail = 'nsmnavarasan@gmail.com';
+      const emailContent = {
+        to: superAdminEmail,
+        subject: 'New Admin Registration Request - AuthJet',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #dc2626;">🔐 New Admin Registration Request</h2>
+            
+            <div style="background: #f9fafb; padding: 20px; border-radius: 8px; margin: 20px 0;">
+              <h3>Request Details:</h3>
+              <p><strong>Name:</strong> ${name}</p>
+              <p><strong>Email:</strong> ${email}</p>
+              <p><strong>Requested At:</strong> ${new Date(request.requested_at).toLocaleString()}</p>
+              <p><strong>Request ID:</strong> ${request.id}</p>
+            </div>
+
+            <div style="background: #fff7ed; padding: 20px; border-radius: 8px; margin: 20px 0;">
+              <h4>Justification:</h4>
+              <p>${justification || 'No justification provided'}</p>
+            </div>
+
+            <div style="background: #f0f9ff; padding: 20px; border-radius: 8px; margin: 20px 0;">
+              <h4>Actions Required:</h4>
+              <p>To approve or reject this request, please:</p>
+              <ol>
+                <li>Log in to your admin dashboard</li>
+                <li>Review the request details carefully</li>
+                <li>Verify the requester's identity and legitimacy</li>
+                <li>Use the admin approval system to approve/reject</li>
+              </ol>
+            </div>
+
+            <div style="background: #fef2f2; padding: 20px; border-radius: 8px; margin: 20px 0;">
+              <p><strong>⚠️ Security Note:</strong> Only approve admin requests for trusted individuals who require platform administration access.</p>
+            </div>
+          </div>
+        `
+      };
+
+      try {
+        await emailService.send(emailContent);
+        logger.info('Admin approval email sent', { 
+          requestId: request.id, 
+          requesterEmail: email,
+          superAdminEmail: superAdminEmail
+        });
+      } catch (emailError) {
+        logger.error('Failed to send admin approval email', { 
+          error: emailError.message,
+          requestId: request.id
+        });
+        // Don't fail the request if email fails, just log it
+      }
+
+      logger.info('Admin registration request created', { 
+        requestId: request.id, 
+        email: request.email 
       });
-
-      const refreshToken = await jwtService.generateRefreshToken({
-        id: admin.id,
-        type: 'admin',
-      });
-
-      // Store session
-      await database.query(`
-        INSERT INTO sessions (admin_id, session_type, refresh_token, expires_at)
-        VALUES ($1, $2, $3, $4)
-      `, [
-        admin.id,
-        'admin',
-        refreshToken,
-        new Date(Date.now() + jwtService.refreshTokenExpiryMs),
-      ]);
-
-      logger.info('Admin registration successful', { adminId: admin.id, email: admin.email });
 
       res.status(201).json({
-        admin: {
-          id: admin.id,
-          email: admin.email,
-          name: admin.name,
-          role: admin.role,
+        success: true,
+        message: 'Admin registration request submitted successfully',
+        request: {
+          id: request.id,
+          email: request.email,
+          name: request.name,
+          status: 'pending',
+          requested_at: request.requested_at
         },
-        tokens: {
-          access_token: accessToken,
-          refresh_token: refreshToken,
-          expires_in: jwtService.accessTokenExpirySeconds,
-        },
+        note: 'Your request has been sent to the system administrator for approval. You will be notified once your request is reviewed.'
       });
 
     } catch (error) {
-      logger.error('Admin registration error:', error);
+      logger.error('Admin registration request error:', error);
       next(error);
     }
   }
@@ -149,8 +182,8 @@ class AdminController {
 
       if (result.rows.length === 0) {
         return res.status(401).json({
-          error: 'Invalid credentials',
-          code: 'INVALID_CREDENTIALS',
+          error: 'Invalid login. Only existing admins can login.',
+          code: 'ADMIN_NOT_FOUND',
         });
       }
 
@@ -174,8 +207,28 @@ class AdminController {
       }
 
       // Generate tokens
-      const accessToken = await jwtService.generateToken(admin.id, '1h');
-      const refreshToken = await jwtService.generateToken(admin.id, '7d');
+      const accessToken = jwt.sign(
+        {
+          sub: admin.id,
+          email: admin.email,
+          name: admin.name,
+          type: 'admin',
+          provider: 'email',
+          iat: Math.floor(Date.now() / 1000)
+        },
+        process.env.JWT_SECRET,
+        { expiresIn: '24h' }
+      );
+      
+      const refreshToken = jwt.sign(
+        {
+          sub: admin.id,
+          type: 'admin_refresh',
+          iat: Math.floor(Date.now() / 1000)
+        },
+        process.env.JWT_SECRET,
+        { expiresIn: '7d' }
+      );
 
       // Create session
       const sessionQuery = `
@@ -209,13 +262,14 @@ class AdminController {
         [admin.id]
       );
 
-      logger.info('Admin login successful', { adminId: admin.id, email });
+      logger.info('Admin login successful', { adminId: admin.id, email, provider: 'email' });
 
       res.json({
+        success: true,
         access_token: accessToken,
         refresh_token: refreshToken,
         token_type: 'Bearer',
-        expires_in: 3600,
+        expires_in: 86400, // 24 hours
         admin: {
           id: admin.id,
           email: admin.email,

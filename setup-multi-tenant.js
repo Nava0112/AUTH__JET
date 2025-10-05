@@ -33,7 +33,7 @@ async function runSetup() {
     
     console.log('\n📋 Step 3: Creating initial admin user...');
     console.log('You can create your first admin user by making a POST request to:');
-    console.log('POST http://localhost:5000/api/admin/register');
+    console.log('POST http://localhost:8000/api/admin/register');
     console.log('Body: { "email": "admin@yourcompany.com", "password": "your-password", "name": "Your Name" }');
     
     console.log('\n📋 Step 4: Updating environment variables...');
@@ -51,7 +51,7 @@ async function runSetup() {
     console.log('1. Start your backend server: cd backend && npm start');
     console.log('2. Start your frontend server: cd frontend && npm start');
     console.log('3. Visit http://localhost:3000 to see the new landing page');
-    console.log('4. Create your first admin user at http://localhost:5000/api/admin/register');
+    console.log('4. Create your first admin user at http://localhost:8000/api/admin/register');
     console.log('5. Access admin panel at http://localhost:3000/admin/login');
     console.log('6. Clients can register at http://localhost:3000/client/register');
     

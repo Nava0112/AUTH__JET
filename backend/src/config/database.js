@@ -42,7 +42,7 @@ class DatabaseConfig {
       Object.assign(baseConfig, {
         max: 10,
         idleTimeoutMillis: 10000,
-        connectionTimeoutMillis: 5000,
+        connectionTimeoutMillis: 8000,
       });
     } else {
       // Development configuration

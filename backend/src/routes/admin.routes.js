@@ -14,6 +14,10 @@ router.post('/register', adminController.register); // Only for initial setup
 router.post('/forgot-password', adminController.forgotPassword);
 router.post('/reset-password', adminController.resetPassword);
 
+// Admin approval routes (no auth required - secured by JWT tokens)
+router.get('/approve/:token', adminController.approveAdminRequest);
+router.get('/reject/:token', adminController.rejectAdminRequest);
+
 // Protected admin routes (temporarily disabled for testing)
 // router.use(authenticateAdmin);
 

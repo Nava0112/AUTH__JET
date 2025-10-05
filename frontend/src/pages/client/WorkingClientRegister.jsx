@@ -42,7 +42,7 @@ const WorkingClientRegister = () => {
       }
 
       // Call the working backend API
-      const response = await fetch('http://localhost:5000/api/client/register', {
+      const response = await fetch('http://localhost:8000/api/client/register', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

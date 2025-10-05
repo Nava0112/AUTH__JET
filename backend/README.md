@@ -141,7 +141,7 @@ See `.env.example` for all available configuration options.
 
 ### Required Variables
 - `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` - Database connection
-- `PORT` - Server port (default: 5000)
+- `PORT` - Server port (default: 8000)
 - `NODE_ENV` - Environment (development/production/test)
 
 ### Optional Variables

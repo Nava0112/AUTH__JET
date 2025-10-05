@@ -5,7 +5,7 @@ class AdminAuthService {
     this.tokenKey = 'authjet_admin_token';
     this.refreshTokenKey = 'authjet_admin_refresh_token';
     this.adminKey = 'authjet_admin_user';
-    this.baseURL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+    this.baseURL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
     
     // Create axios instance for admin API
     this.api = axios.create({

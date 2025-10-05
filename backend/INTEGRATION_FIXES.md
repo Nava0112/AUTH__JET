@@ -212,7 +212,7 @@ AuthJetApp class (src/app.js)
 
 5. **Test API:**
    ```bash
-   curl http://localhost:5000/health
+   curl http://localhost:8000/health
    ```
 
 ## Known Limitations

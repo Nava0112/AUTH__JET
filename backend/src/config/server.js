@@ -2,7 +2,7 @@ const logger = require('../utils/logger');
 
 class ServerConfig {
   constructor() {
-    this.port = process.env.PORT || 5000;
+    this.port = process.env.PORT || 8000;
     this.nodeEnv = process.env.NODE_ENV || 'development';
     this.isProduction = this.nodeEnv === 'production';
     this.isDevelopment = this.nodeEnv === 'development';

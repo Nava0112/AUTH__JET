@@ -146,7 +146,7 @@ const CreateApplication = () => {
       console.log('Creating application:', applicationData);
 
       // Call the backend API
-      const response = await fetch('http://localhost:5000/api/client/applications', {
+      const response = await fetch('http://localhost:8000/api/client/applications', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

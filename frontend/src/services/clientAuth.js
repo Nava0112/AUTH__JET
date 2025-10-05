@@ -5,7 +5,7 @@ class ClientAuthService {
     this.tokenKey = 'authjet_client_token';
     this.refreshTokenKey = 'authjet_client_refresh_token';
     this.clientKey = 'authjet_client_user';
-    this.baseURL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+    this.baseURL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
     
     // Create axios instance for client API
     this.api = axios.create({

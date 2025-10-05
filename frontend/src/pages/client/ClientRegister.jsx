@@ -43,7 +43,7 @@ const ClientRegister = () => {
       // Show success message with API credentials
       setTimeout(() => {
         navigate('/client/login');
-      }, 5000);
+      }, 8000);
     } catch (err) {
       setError(err.message || 'Registration failed');
     } finally {
