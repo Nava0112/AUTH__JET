@@ -118,7 +118,7 @@ const authenticateClient = async (req, res, next) => {
       }
 
       const client = clientResult.rows[0];
-      /*
+
       // Verify session exists and is valid
       const sessionQuery = `
         SELECT * FROM sessions 
@@ -134,7 +134,7 @@ const authenticateClient = async (req, res, next) => {
           code: 'INVALID_CLIENT_SESSION',
         });
       }
-      */
+  
       // Attach client info to request
       req.client = {
         id: client.id,
