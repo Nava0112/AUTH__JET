@@ -118,7 +118,7 @@ const authenticateClient = async (req, res, next) => {
       }
 
       const client = clientResult.rows[0];
-      
+      /*
       // Verify session exists and is valid
       const sessionQuery = `
         SELECT * FROM sessions 
@@ -134,7 +134,7 @@ const authenticateClient = async (req, res, next) => {
           code: 'INVALID_CLIENT_SESSION',
         });
       }
-
+      */
       // Attach client info to request
       req.client = {
         id: client.id,
@@ -209,7 +209,7 @@ const authenticateUser = async (req, res, next) => {
         WHERE user_id = $1 AND session_type = 'user' 
         AND expires_at > NOW() AND revoked = false
       `;
-      
+
       const sessionResult = await database.query(sessionQuery, [user.id]);
       
       if (sessionResult.rows.length === 0) {
@@ -218,7 +218,7 @@ const authenticateUser = async (req, res, next) => {
           code: 'INVALID_USER_SESSION',
         });
       }
-
+      
       // Attach user info to request
       req.user = {
         id: user.id,

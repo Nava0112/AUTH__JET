@@ -24,27 +24,55 @@ const WorkingClientDashboard = () => {
 
   const fetchDashboardStats = async () => {
     try {
+      const token = localStorage.getItem('clientToken');
+      if (!token) {
+        throw new Error('No authentication token found. Please login again.');
+      }
+  
+      const headers = {
+        'Authorization': `Bearer ${token}`
+      };
+  
       const [statsResponse, appsResponse] = await Promise.all([
-        fetch('http://localhost:8000/api/dashboard/client/stats'),
-        fetch('http://localhost:8000/api/dashboard/client/applications')
+        fetch('http://localhost:8000/api/client/dashboard/stats', { headers }),
+        fetch('http://localhost:8000/api/client/applications', { headers })
       ]);
       
       const statsData = await statsResponse.json();
       const appsData = await appsResponse.json();
       
-      if (statsResponse.ok && statsData.success) {
-        setStats(statsData.stats);
+      console.log('=== DASHBOARD DEBUG ===');
+      console.log('Stats response:', statsData);
+      console.log('Apps response:', appsData);
+      console.log('=== END DEBUG ===');
+      
+      // Handle stats data
+      if (statsResponse.ok) {
+        // The backend might return stats directly or in a stats property
+        setStats(statsData.stats || statsData);
+      } else {
+        throw new Error(statsData.error || 'Failed to fetch stats');
       }
       
-      if (appsResponse.ok && appsData.success) {
-        setApplications(appsData.applications);
+      // Handle applications data - FIX THIS PART
+      if (appsResponse.ok) {
+        // The backend might return applications as 'clients' or 'applications'
+        if (appsData.applications) {
+          setApplications(appsData.applications);
+        } else if (appsData.clients) {
+          setApplications(appsData.clients);
+        } else if (Array.isArray(appsData)) {
+          setApplications(appsData);
+        } else {
+          setApplications([]); // Default to empty array
+        }
+      } else {
+        throw new Error(appsData.error || 'Failed to fetch applications');
       }
       
-      if (!statsResponse.ok || !appsResponse.ok) {
-        throw new Error('Failed to fetch dashboard data');
-      }
     } catch (err) {
       setError('Failed to load dashboard data: ' + err.message);
+      console.error('Dashboard fetch error:', err);
     } finally {
       setLoading(false);
     }
@@ -57,7 +85,17 @@ const WorkingClientDashboard = () => {
 
   const testEndpoint = async (endpoint, name) => {
     try {
-      const response = await fetch(`http://localhost:8000/api/client/${endpoint}`);
+      const token = localStorage.getItem('clientToken');
+      if (!token) {
+        alert('No token found. Please login first.');
+        return;
+      }
+  
+      const response = await fetch(`http://localhost:8000/api/client/${endpoint}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
       const data = await response.json();
       alert(`${name} Response:\n${JSON.stringify(data, null, 2)}`);
     } catch (err) {
@@ -157,7 +195,7 @@ const WorkingClientDashboard = () => {
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                 }`}
               >
-                🚀 Applications ({stats?.clientApplications || 0})
+                🚀 Applications ({applications.length || stats?.totalApplications || 0})
               </button>
             </nav>
           </div>
@@ -182,7 +220,7 @@ const WorkingClientDashboard = () => {
                     <div className="ml-5 w-0 flex-1">
                       <dl>
                         <dt className="text-sm font-medium text-gray-500 truncate">My Applications</dt>
-                        <dd className="text-2xl font-bold text-gray-900">{stats?.clientApplications || 0}</dd>
+                        <dd className="text-2xl font-bold text-gray-900">{stats?.totalApplications || applications.length || 0}</dd>
                         <dd className="text-xs text-gray-500">Active apps</dd>
                       </dl>
                     </div>

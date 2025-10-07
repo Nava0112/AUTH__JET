@@ -37,18 +37,26 @@ const SimpleClientLogin = () => {
         body: JSON.stringify(formData)
       });
 
+      console.log('=== RAW RESPONSE ===');
+      console.log('Status:', response.status);
+      console.log('Headers:', Object.fromEntries(response.headers));
       const data = await response.json();
+      console.log('Response data:', data);
+      console.log('=== END DEBUG ===');
 
-      if (response.ok && data.success) {
-        // Store client info
+      if (response.ok) {
+        console.log('Login response data:', data);
+        
+        // Store client info AND tokens
         localStorage.setItem('client', JSON.stringify(data.client));
+        localStorage.setItem('clientToken', data.access_token); // ← Use access_token
+        localStorage.setItem('clientRefreshToken', data.refresh_token); // Optional
         
         // Show success message
         alert(`Welcome back, ${data.client.name}! Redirecting to dashboard...`);
         
         // Redirect to client dashboard
         navigate('/client/dashboard');
-        
       } else {
         throw new Error(data.error || 'Login failed');
       }

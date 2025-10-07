@@ -118,57 +118,62 @@ class ClientAuthController {
       }
 
       // Generate tokens
-      const accessToken = await jwtService.generateToken(client.id, '2h');
-      const refreshToken = await jwtService.generateToken(client.id, '30d');
+      // Generate tokens
+    const accessToken = await jwtService.generateAccessToken({
+      sub: client.id,
+      email: client.email,
+      type: 'client'
+    });
 
-      // Create session
-      const sessionQuery = `
-        INSERT INTO sessions (
-          client_id, session_type, token_hash, refresh_token_hash,
-          expires_at, refresh_expires_at, ip_address, user_agent
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        RETURNING id
-      `;
+    // Create session with correct column names
+    const sessionQuery = `
+      INSERT INTO sessions (
+        client_id, session_type, refresh_token,
+        expires_at, ip_address
+      )
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING id
+    `;
 
-      const tokenHash = await crypto.hashPassword(accessToken);
-      const refreshTokenHash = await crypto.hashPassword(refreshToken);
-      const expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000); // 2 hours
-      const refreshExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
+    const expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000); // 2 hours
 
-      await database.query(sessionQuery, [
-        client.id,
-        'client',
-        tokenHash,
-        refreshTokenHash,
-        expiresAt,
-        refreshExpiresAt,
-        req.ip,
-        req.get('User-Agent')
-      ]);
+    await database.query(sessionQuery, [
+      client.id,
+      'client',
+      accessToken, // Store access token as refresh_token (temporary fix)
+      expiresAt,
+      req.ip
+    ]);
 
-      // Update last login
-      await database.query(
-        'UPDATE clients SET last_login = NOW() WHERE id = $1',
-        [client.id]
-      );
+    // Update last login
+    await database.query(
+      'UPDATE clients SET last_login = NOW() WHERE id = $1',
+      [client.id]
+    );
 
-      logger.info('Client login successful', { clientId: client.id, email });
+    logger.info('Client login successful', { clientId: client.id, email });
+    // Add debug logging
+    console.log('=== BACKEND LOGIN DEBUG ===');
+    console.log('Access token generated:', accessToken);
+    console.log('Access token type:', typeof accessToken);
+    console.log('Access token length:', accessToken?.length);
+    console.log('Client ID:', client.id);
 
-      res.json({
-        access_token: accessToken,
-        refresh_token: refreshToken,
-        token_type: 'Bearer',
-        expires_in: 7200,
-        client: {
-          id: client.id,
-          email: client.email,
-          name: client.name,
-          company_name: client.company_name,
-          plan_type: client.plan_type,
-          email_verified: client.email_verified,
-        },
-      });
+    res.json({
+      access_token: accessToken,
+      refresh_token: accessToken,
+      token_type: 'Bearer',
+      expires_in: 7200,
+      client: {
+        id: client.id,
+        email: client.email,
+        name: client.name,
+        company_name: client.company_name,
+        plan_type: client.plan_type,
+        email_verified: client.email_verified,
+      },
+    });
+
 
     } catch (error) {
       logger.error('Client login error:', error);

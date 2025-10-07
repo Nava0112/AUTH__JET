@@ -80,7 +80,13 @@ class DashboardController {
   async getClientStats(req, res) {
     try {
       // For now, using clientId = 1 (should come from auth middleware)
-      const clientId = 1;
+      const clientId = req.client?.id;
+      if (!clientId) {
+        return res.status(401).json({
+          error: 'Client authentication required',
+          code: 'CLIENT_AUTH_REQUIRED',
+        });
+      }
 
       // Get client's applications count
       const appsResult = await database.query(`
@@ -165,7 +171,13 @@ class DashboardController {
   // Get detailed application statistics
   async getApplicationStats(req, res) {
     try {
-      const clientId = 1; // Should come from auth middleware
+      const clientId = req.client?.id;
+      if (!clientId) {
+        return res.status(401).json({
+          error: 'Client authentication required',
+          code: 'CLIENT_AUTH_REQUIRED',
+        });
+      } // Should come from auth middleware
 
       // Get applications with detailed user statistics
       const result = await database.query(`

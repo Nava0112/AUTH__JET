@@ -40,14 +40,8 @@ tmp/
 temp/
 
 
-*.md
-
-backend/database.json
-
 backend/.env
 backend/.env.backup
 .env
 .env.local
 .env.production
-
-backend/*.js

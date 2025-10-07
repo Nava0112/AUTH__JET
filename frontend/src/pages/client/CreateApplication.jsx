@@ -114,6 +114,7 @@ const CreateApplication = () => {
     }
   };
 
+  
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -146,14 +147,21 @@ const CreateApplication = () => {
       console.log('Creating application:', applicationData);
 
       // Call the backend API
+      const token = localStorage.getItem('clientToken'); // Get the JWT token
+      if (!token) {
+        throw new Error('Authentication token missing. Please login again.');
+      }
+
       const response = await fetch('http://localhost:8000/api/client/applications', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`, // Add Authorization header
         },
         body: JSON.stringify(applicationData)
       });
 
+      
       const data = await response.json();
       console.log('Response:', data);
 

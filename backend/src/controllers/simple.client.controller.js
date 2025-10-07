@@ -92,27 +92,27 @@ class SimpleClientController {
           error: 'Email and password are required'
         });
       }
-
+  
       // Find client
       const result = await database.query(
         'SELECT id, name, email, password_hash, organization_name, plan_type, is_active FROM clients WHERE email = $1',
         [email]
       );
-
+  
       if (result.rows.length === 0) {
         return res.status(401).json({
           error: 'Invalid credentials'
         });
       }
-
+  
       const client = result.rows[0];
-
+  
       if (!client.is_active) {
         return res.status(401).json({
           error: 'Account is suspended. Please contact support.'
         });
       }
-
+  
       // Check password
       const validPassword = await bcrypt.compare(password, client.password_hash);
       
@@ -121,18 +121,56 @@ class SimpleClientController {
           error: 'Invalid credentials'
         });
       }
-
+  
+      // ✅ ADD TOKEN GENERATION
+      const jwtService = require('../services/jwt.service');
+      const accessToken = await jwtService.generateAccessToken({
+        sub: client.id,
+        email: client.email,
+        type: 'client'
+      });
+  
+      // ✅ ADD SESSION CREATION
+      try {
+        const sessionQuery = `
+          INSERT INTO sessions (
+            client_id, session_type, refresh_token,
+            expires_at, ip_address
+          )
+          VALUES ($1, $2, $3, $4, $5)
+          RETURNING id
+        `;
+  
+        const expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000); // 2 hours
+  
+        await database.query(sessionQuery, [
+          client.id,
+          'client',
+          accessToken, // Store access token as refresh_token
+          expiresAt,
+          req.ip || 'unknown'
+        ]);
+  
+        logger.info('Client session created', { clientId: client.id });
+      } catch (sessionError) {
+        logger.warn('Failed to create session, but continuing:', sessionError.message);
+        // Don't fail login if session creation fails
+      }
+  
       // Update last login
       await database.query(
         'UPDATE clients SET last_login = NOW() WHERE id = $1',
         [client.id]
       );
-
+  
       logger.info('Client login successful', { clientId: client.id });
-
+  
+      // ✅ RETURN TOKENS IN RESPONSE
       res.json({
-        success: true,
-        message: 'Login successful',
+        access_token: accessToken,
+        refresh_token: accessToken, // Use same token for now
+        token_type: 'Bearer',
+        expires_in: 7200,
         client: {
           id: client.id,
           name: client.name,
@@ -141,15 +179,15 @@ class SimpleClientController {
           planType: client.plan_type
         }
       });
-
-    } catch (error) {
-      logger.error('Client login error:', error);
-      res.status(500).json({
-        error: 'Login failed',
-        details: error.message
-      });
+  
+      } catch (error) {
+        logger.error('Client login error:', error);
+        res.status(500).json({
+          error: 'Login failed',
+          details: error.message
+        });
+      }
     }
-  }
 
   async getDashboard(req, res, next) {
     try {
@@ -180,16 +218,32 @@ class SimpleClientController {
         );
       `);
 
+      // Get the authenticated client's ID
+      const clientId = req.client?.id;
+
+      if (!clientId) {
+        return res.status(401).json({
+          error: 'Client authentication required',
+          code: 'CLIENT_AUTH_REQUIRED',
+        });
+      }
+
+      // Get actual stats for this client
+      const applicationsResult = await database.query(
+        'SELECT COUNT(*) as count FROM client_applications WHERE client_id = $1',
+        [clientId]
+      );
+
+      const usersResult = await database.query(
+        'SELECT COUNT(*) as count FROM users WHERE client_id = $1',
+        [clientId]
+      );
+
       const stats = {
-        totalApplications: 0,
-        totalUsers: 0,
+        totalApplications: parseInt(applicationsResult.rows[0]?.count || 0),
+        totalUsers: parseInt(usersResult.rows[0]?.count || 0),
         recentActivity: []
       };
-
-      // Get application count for this client (placeholder for now)
-      stats.totalApplications = 0;
-      stats.totalUsers = 0;
-
       res.json({
         success: true,
         stats
@@ -388,62 +442,66 @@ class SimpleClientController {
   // Application management placeholders
   async getApplications(req, res) {
     try {
-      // For now, return clients instead of applications to match the UI
-      const result = await database.query(`
-        SELECT id, name, email as contact_email, organization_name as website,
-               client_id, plan_type, created_at, updated_at
-        FROM clients 
-        ORDER BY created_at DESC
-      `);
+      // Get the authenticated client's ID from the request
+      const clientId = req.client?.id;
+    
+    console.log('=== GET APPLICATIONS DEBUG ===');
+    console.log('Request client object:', req.client);
+    console.log('Extracted client ID:', clientId);
+    console.log('Request headers:', req.headers);
+    console.log('=== END DEBUG ===');
 
-      // If no clients exist, create a sample one
+    if (!clientId) {
+      return res.status(401).json({
+        error: 'Client authentication required',
+        code: 'CLIENT_AUTH_REQUIRED',
+      });
+    }
+  
+      console.log('=== GET APPLICATIONS DEBUG ===');
+      console.log('Authenticated client ID:', clientId);
+      console.log('=== END DEBUG ===');
+  
+      // Return ONLY this client's applications
+      const result = await database.query(`
+        SELECT 
+          ca.*,
+          COUNT(u.id) as user_count
+        FROM client_applications ca
+        LEFT JOIN users u ON ca.id = u.application_id AND u.is_active = true
+        WHERE ca.client_id = $1
+        GROUP BY ca.id
+        ORDER BY ca.created_at DESC
+      `, [clientId]);
+  
+      // If no applications exist for this client, return empty array
       if (result.rows.length === 0) {
-        logger.info('No clients found, creating sample client...');
-        
-        const crypto = require('crypto');
-        const sampleClientId = `cli_${crypto.randomBytes(16).toString('hex')}`;
-        const sampleClientSecret = `secret_${crypto.randomBytes(32).toString('hex')}`;
-        
-        await database.query(`
-          INSERT INTO clients (name, email, password_hash, organization_name, client_id, client_secret, plan_type)
-          VALUES ('Sample Client', 'sample@example.com', 'dummy_hash', 'Sample Organization', $1, $2, 'basic')
-        `, [sampleClientId, sampleClientSecret]);
-        
-        // Query again
-        const retryResult = await database.query(`
-          SELECT id, name, email as contact_email, organization_name as website,
-                 client_id, plan_type, created_at, updated_at
-          FROM clients 
-          ORDER BY created_at DESC
-        `);
-        
-        const clients = retryResult.rows;
         return res.json({
-          clients: clients,
+          applications: [],
           pagination: {
             page: 1,
             limit: 10,
-            total: clients.length,
-            pages: 1
+            total: 0,
+            pages: 0
           }
         });
       }
-
-      const clients = result.rows;
+  
+      const applications = result.rows;
       
       res.json({
-        clients: clients,
+        applications: applications,
         pagination: {
           page: 1,
           limit: 10,
-          total: clients.length,
-          pages: Math.ceil(clients.length / 10)
+          total: applications.length,
+          pages: Math.ceil(applications.length / 10)
         }
       });
     } catch (error) {
-      logger.error('Get clients error:', error);
+      logger.error('Get applications error:', error);
       res.status(500).json({ 
-        error: 'Failed to fetch clients',
+        error: 'Failed to fetch applications',
         details: error.message 
       });
     }
@@ -499,7 +557,13 @@ class SimpleClientController {
 
       // For now, we'll use a simple client ID from localStorage or session
       // In a real implementation, this would come from authenticated session
-      const clientId = 1; // Placeholder - should come from auth middleware
+      const clientId = req.client?.id;
+      if (!clientId) {
+        return res.status(401).json({
+          error: 'Client authentication required',
+          code: 'CLIENT_AUTH_REQUIRED',
+        });
+      } // Placeholder - should come from auth middleware
       
       // Generate client secret
       const crypto = require('crypto');
