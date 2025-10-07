@@ -261,71 +261,21 @@ class SimpleClientController {
   // Get client profile with credentials
   async getProfile(req, res) {
     try {
-      // For /api/client/profile route (no ID in URL), we'll use a default client ID
-      // or get it from session/auth. For now, let's use ID 1 as default
-      const id = req.params.id || req.query.id || '1';
-
-      logger.info('Getting client profile for ID:', id);
+      // Use the authenticated client's ID from the request
+      const id = req.client?.id;
       
-      // First, let's see what clients exist
-      const allClients = await database.query('SELECT id, name, email FROM clients LIMIT 10');
-      logger.info('Available clients in database:', allClients.rows);
-      
-      // If no clients exist and ID is 1, create a test client
-      if (allClients.rows.length === 0 && id === '1') {
-        logger.info('No clients found, creating test client...');
-        
-        const crypto = require('crypto');
-        const testClientId = `cli_${crypto.randomBytes(16).toString('hex')}`;
-        const testClientSecret = `secret_${crypto.randomBytes(32).toString('hex')}`;
-        
-        await database.query(`
-          INSERT INTO clients (id, name, email, password_hash, organization_name, client_id, client_secret, plan_type)
-          VALUES (1, 'Test Client', 'test@example.com', 'dummy_hash', 'Test Organization', $1, $2, 'basic')
-        `, [testClientId, testClientSecret]);
-        
-        // Try the query again
-        const retryResult = await database.query(
-          `SELECT id, name, email, organization_name, plan_type, 
-                  client_id, client_secret, created_at, updated_at, last_login
-           FROM clients 
-           WHERE id = $1`,
-          [id]
-        );
-        
-        if (retryResult.rows.length > 0) {
-          const client = retryResult.rows[0];
-          
-          logger.info('Auto-created client credentials:', {
-            clientId: client.client_id,
-            hasSecret: !!client.client_secret
-          });
-
-          return res.json({
-            client: {
-              id: client.id,
-              name: client.name,
-              contact_email: client.email,
-              organization_name: client.organization_name,
-              description: client.organization_name,
-              website: client.organization_name,
-              plan_type: client.plan_type || 'basic',
-              status: 'active',
-              api_key: client.client_id,
-              client_id: client.client_id,
-              client_secret: client.client_secret,
-              secret_key: client.client_secret,
-              created_at: client.created_at,
-              updated_at: client.updated_at,
-              last_login: client.last_login,
-              redirect_urls: ['https://localhost:3000/auth/callback'],
-              allowed_origins: ['https://localhost:3000'],
-              webhook_url: null
-            }
-          });
-        }
+      if (!id) {
+        return res.status(401).json({
+          error: 'Client authentication required',
+          code: 'CLIENT_AUTH_REQUIRED',
+        });
       }
-
+  
+      console.log('=== PROFILE DEBUG ===');
+      console.log('Authenticated client ID:', id);
+      console.log('Request client object:', req.client);
+      console.log('=== END DEBUG ===');
+  
       // Query the client data including credentials
       const result = await database.query(
         `SELECT id, name, email, organization_name, plan_type, 
@@ -334,16 +284,16 @@ class SimpleClientController {
          WHERE id = $1`,
         [id]
       );
-
+  
       if (result.rows.length === 0) {
         return res.status(404).json({
           error: 'Client not found',
           code: 'CLIENT_NOT_FOUND'
         });
       }
-
+  
       const client = result.rows[0];
-
+  
       // Check if client has credentials, generate if missing
       let clientId = client.client_id;
       let clientSecret = client.client_secret;
@@ -367,14 +317,14 @@ class SimpleClientController {
           clientName: client.name
         });
       }
-
+  
       // Use actual stored credentials from database
       logger.info('Retrieved stored credentials for client:', {
         clientId: clientId,
         hasSecret: !!clientSecret,
         secretLength: clientSecret?.length
       });
-
+  
       const responseData = {
         client: {
           id: client.id,
@@ -385,10 +335,8 @@ class SimpleClientController {
           website: client.organization_name,
           plan_type: client.plan_type || 'basic',
           status: 'active',
-          api_key: clientId,
           client_id: clientId,
           client_secret: clientSecret,
-          secret_key: clientSecret,
           created_at: client.created_at,
           updated_at: client.updated_at,
           last_login: client.last_login,
@@ -397,15 +345,15 @@ class SimpleClientController {
           webhook_url: null
         }
       };
-
+  
       logger.info('Sending client profile response:', {
         hasClientSecret: !!responseData.client.client_secret,
         clientSecretLength: responseData.client.client_secret?.length
       });
-
+  
       // Return client profile with credentials
       res.json(responseData);
-
+  
     } catch (error) {
       logger.error('Get client profile error:', error);
       res.status(500).json({

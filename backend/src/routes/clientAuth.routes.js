@@ -19,14 +19,12 @@ router.post('/verify-email', clientAuthController.verifyEmail);
 // router.use(authenticateClient);
 
 // Client profile management
+router.use(authenticateClient);
 router.get('/profile', clientAuthController.getProfile);
-router.get('/profile/:id', clientAuthController.getProfile); // Alternative route with ID
-router.put('/profile', clientAuthController.updateProfile);
 router.post('/change-password', clientAuthController.changePassword);
 router.post('/logout', clientAuthController.logout);
 
 // Client dashboard
-router.use(authenticateClient);
 router.get('/dashboard/stats', clientAuthController.getDashboard);
 
 // Application management
