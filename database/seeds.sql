@@ -1,389 +1,347 @@
--- AuthJet SaaS - Seed Data
--- This file populates the database with initial data for development and testing
 
--- Insert sample clients
-INSERT INTO clients (
-    id, name, contact_email, website, business_type, 
-    api_key, secret_key_hash, allowed_domains, default_roles,
-    plan_type, settings, created_at
-) VALUES 
+-- Enable UUID extension if not already enabled
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- Insert Admin Requests
+INSERT INTO admin_requests (id, email, password_hash, name, justification, status, requested_at, reviewed_at) VALUES
 (
-    'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'::UUID,
-    'AuthJet Development',
-    'dev@authjet.com',
-    'https://dev.authjet.com',
-    'saas',
-    'cli_dev_123456789012',
-    -- Hash for 'dev_secret_123456789012345678901234567890'
-    '$2a$12$K9VrK9vL9VrK9vL9VrK9vO9VrK9vL9VrK9vL9VrK9vL9VrK9vL9VrK',
-    '["localhost", "127.0.0.1", "*.authjet.com", "*.example.com"]'::JSONB,
-    '["user", "admin"]'::JSONB,
-    'pro',
-    '{
-        "webhook_secret": "dev_webhook_secret_123456",
-        "max_users": 10000,
-        "session_timeout": 3600,
-        "require_email_verification": false,
-        "password_policy": {
-            "min_length": 8,
-            "require_uppercase": true,
-            "require_lowercase": true,
-            "require_numbers": true,
-            "require_special": true
-        }
-    }'::JSONB,
-    NOW() - INTERVAL '30 days'
+    'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+    'new.admin@company.com',
+    '$2a$12$LQv3c1yqBWVHxkd0g8fK0u7t7JvQW7t7G8bVc6Yf5hT0cA1bC2dE3', -- hashed "request123"
+    'New Admin User',
+    'Need admin access to manage client applications and user roles across the platform.',
+    'pending',
+    '2024-01-15 10:00:00',
+    NULL
 ),
 (
-    'b1ffc99-9c0b-4ef8-bb6d-6bb9bd380a12'::UUID,
-    'Example E-Commerce',
-    'tech@example-store.com',
-    'https://example-store.com',
-    'ecommerce',
-    'cli_eco_987654321098',
-    -- Hash for 'eco_secret_987654321098765432109876543210'
-    '$2a$12$L8WwW8L8WwW8L8WwW8L8W.O8WwW8L8WwW8L8WwW8L8WwW8L8WwW8L8W',
-    '["example-store.com", "api.example-store.com", "admin.example-store.com"]'::JSONB,
-    '["customer", "vendor", "admin"]'::JSONB,
-    'pro',
-    '{
-        "webhook_url": "https://api.example-store.com/auth/webhook",
-        "webhook_secret": "eco_webhook_secret_654321",
-        "max_users": 80000,
-        "session_timeout": 7200,
-        "branding": {
-            "logo": "https://example-store.com/logo.png",
-            "primary_color": "#4F46E5"
-        }
-    }'::JSONB,
-    NOW() - INTERVAL '15 days'
+    'b2c3d4e5-f6g7-8901-bcde-f23456789012',
+    'reviewed.admin@org.com',
+    '$2a$12$M9v3c1yqBWVHxkd0g8fK0u7t7JvQW7t7G8bVc6Yf5hT0cA1bC2dE3', -- hashed "request456"
+    'Reviewed Admin',
+    'Required for system monitoring and audit purposes.',
+    'approved',
+    '2024-01-10 14:30:00',
+    '2024-01-12 09:15:00'
 ),
 (
-    'c2eecc99-9c0b-4ef8-bb6d-6bb9bd380a13'::UUID,
-    'Startup Free Tier',
-    'founder@startup.io',
-    'https://startup.io',
-    'technology',
-    'cli_sta_555555555555',
-    -- Hash for 'sta_secret_555555555555555555555555555555'
-    '$2a$12$M5N5M5N5M5N5M5N5M5N5M.Q5N5M5N5M5N5M5N5M5N5M5N5M5N5M5N5',
-    '["startup.io", "app.startup.io"]'::JSONB,
-    '["user", "premium_user"]'::JSONB,
-    'free',
-    '{
-        "max_users": 1000,
-        "session_timeout": 1800,
-        "features": {
-            "social_login": true,
-            "multi_factor": false,
-            "custom_roles": false
-        }
-    }'::JSONB,
-    NOW() - INTERVAL '7 days'
+    'c3d4e5f6-g7h8-9012-cdef-345678901234',
+    'rejected.admin@test.com',
+    '$2a$12$N0w3c1yqBWVHxkd0g8fK0u7t7JvQW7t7G8bVc6Yf5hT0cA1bC2dE3', -- hashed "request789"
+    'Rejected Admin',
+    'Want to test admin features for evaluation.',
+    'rejected',
+    '2024-01-05 16:45:00',
+    '2024-01-08 11:20:00'
 );
 
--- Insert sample users (passwords are 'Password123!' for all demo users)
-INSERT INTO users (
-    id, email, password_hash, email_verified, status, created_at
-) VALUES 
+-- Insert Admins
+INSERT INTO admins (id, email, password_hash, name, role, is_active, last_login) VALUES
 (
-    'd3ffc99-9c0b-4ef8-bb6d-6bb9bd380a14'::UUID,
-    'admin@authjet.com',
-    -- Hash for 'Password123!'
-    '$2a$12$8B2JaB2J8B2J.B2J8B2J8uB2J8B2J8B2J8B2J8B2J8B2J8B2J8B2J8B',
+    1,
+    'superadmin@authsystem.com',
+    '$2a$12$KQv3c1yqBWVHxkd0g8fK0u7t7JvQW7t7G8bVc6Yf5hT0cA1bC2dE3', -- hashed "superadmin123"
+    'Super Administrator',
+    'super_admin',
     true,
-    'active',
-    NOW() - INTERVAL '25 days'
+    '2024-01-20 08:30:00'
 ),
 (
-    'e4ffc99-9c0b-4ef8-bb6d-6bb9bd380a15'::UUID,
-    'john.customer@example.com',
-    -- Hash for 'Password123!'
-    '$2a$12$8B2JaB2J8B2J.B2J8B2J8uB2J8B2J8B2J8B2J8B2J8B2J8B2J8B2J8B',
-    true,
-    'active',
-    NOW() - INTERVAL '20 days'
-),
-(
-    'f5ffc99-9c0b-4ef8-bb6d-6bb9bd380a16'::UUID,
-    'sarah.vendor@example.com',
-    -- Hash for 'Password123!'
-    '$2a$12$8B2JaB2J8B2J.B2J8B2J8uB2J8B2J8B2J8B2J8B2J8B2J8B2J8B2J8B',
-    true,
-    'active',
-    NOW() - INTERVAL '18 days'
-),
-(
-    'g6ffc99-9c0b-4ef8-bb6d-6bb9bd380a17'::UUID,
-    'mike@startup.io',
-    -- Hash for 'Password123!'
-    '$2a$12$8B2JaB2J8B2J.B2J8B2J8uB2J8B2J8B2J8B2J8B2J8B2J8B2J8B2J8B',
-    false,
-    'active',
-    NOW() - INTERVAL '5 days'
-),
-(
-    'h7ffc99-9c0b-4ef8-bb6d-6bb9bd380a18'::UUID,
-    'demo@authjet.com',
-    -- Hash for 'Password123!'
-    '$2a$12$8B2JaB2J8B2J.B2J8B2J8uB2J8B2J8B2J8B2J8B2J8B2J8B2J8B2J8B',
-    true,
-    'active',
-    NOW() - INTERVAL '2 days'
-);
-
--- Link users to clients with roles
-INSERT INTO client_users (
-    user_id, client_id, roles, custom_data, created_at
-) VALUES 
--- AuthJet Development client users
-(
-    'd3ffc99-9c0b-4ef8-bb6d-6bb9bd380a14'::UUID,
-    'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'::UUID,
-    '["admin", "user"]'::JSONB,
-    '{"department": "engineering", "permissions": ["all"]}'::JSONB,
-    NOW() - INTERVAL '25 days'
-),
-(
-    'h7ffc99-9c0b-4ef8-bb6d-6bb9bd380a18'::UUID,
-    'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'::UUID,
-    '["user"]'::JSONB,
-    '{"department": "demo", "tier": "basic"}'::JSONB,
-    NOW() - INTERVAL '2 days'
-),
--- Example E-Commerce client users
-(
-    'e4ffc99-9c0b-4ef8-bb6d-6bb9bd380a15'::UUID,
-    'b1ffc99-9c0b-4ef8-bb6d-6bb9bd380a12'::UUID,
-    '["customer"]'::JSONB,
-    '{
-        "shipping_address": {
-            "street": "123 Main St",
-            "city": "New York",
-            "state": "NY",
-            "zipcode": "10001"
-        },
-        "loyalty_points": 1500
-    }'::JSONB,
-    NOW() - INTERVAL '20 days'
-),
-(
-    'f5ffc99-9c0b-4ef8-bb6d-6bb9bd380a16'::UUID,
-    'b1ffc99-9c0b-4ef8-bb6d-6bb9bd380a12'::UUID,
-    '["vendor", "admin"]'::JSONB,
-    '{
-        "store_name": "Sarah''s Crafts",
-        "vendor_since": "2023-01-15",
-        "rating": 4.8
-    }'::JSONB,
-    NOW() - INTERVAL '18 days'
-),
--- Startup Free Tier client users
-(
-    'g6ffc99-9c0b-4ef8-bb6d-6bb9bd380a17'::UUID,
-    'c2eecc99-9c0b-4ef8-bb6d-6bb9bd380a13'::UUID,
-    '["premium_user"]'::JSONB,
-    '{
-        "subscription_tier": "premium",
-        "trial_ends": "2024-03-01",
-        "features": ["unlimited_projects", "advanced_analytics"]
-    }'::JSONB,
-    NOW() - INTERVAL '5 days'
-);
-
--- Insert sample sessions
-INSERT INTO sessions (
-    user_id, client_id, refresh_token_hash, device_info, ip_address, user_agent, expires_at, created_at
-) VALUES 
-(
-    'd3ffc99-9c0b-4ef8-bb6d-6bb9bd380a14'::UUID,
-    'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'::UUID,
-    -- Hash of 'refresh_token_admin_123'
-    'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
-    '{
-        "device_type": "desktop",
-        "browser": "Chrome",
-        "browser_version": "119.0",
-        "os": "Windows 11",
-        "screen_resolution": "1920x1080"
-    }'::JSONB,
-    '192.168.1.100'::INET,
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-    NOW() + INTERVAL '7 days',
-    NOW() - INTERVAL '2 hours'
-),
-(
-    'e4ffc99-9c0b-4ef8-bb6d-6bb9bd380a15'::UUID,
-    'b1ffc99-9c0b-4ef8-bb6d-6bb9bd380a12'::UUID,
-    -- Hash of 'refresh_token_john_456'
-    'b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3',
-    '{
-        "device_type": "mobile",
-        "browser": "Safari",
-        "browser_version": "17.0",
-        "os": "iOS 17.1",
-        "screen_resolution": "390x844"
-    }'::JSONB,
-    '10.0.0.50'::INET,
-    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15',
-    NOW() + INTERVAL '7 days',
-    NOW() - INTERVAL '1 hour'
-),
-(
-    'h7ffc99-9c0b-4ef8-bb6d-6bb9bd380a18'::UUID,
-    'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'::UUID,
-    -- Hash of 'refresh_token_demo_789'
-    'c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4',
-    '{
-        "device_type": "tablet",
-        "browser": "Firefox",
-        "browser_version": "120.0",
-        "os": "Android 13",
-        "screen_resolution": "1200x1920"
-    }'::JSONB,
-    '172.16.1.200'::INET,
-    'Mozilla/5.0 (Android 13; Tablet; rv:120.0) Gecko/120.0 Firefox/120.0',
-    NOW() + INTERVAL '7 days',
-    NOW() - INTERVAL '30 minutes'
-);
-
--- Insert sample audit logs
-INSERT INTO audit_logs (
-    user_id, client_id, action, ip_address, user_agent, resource_type, resource_id, metadata, created_at
-) VALUES 
--- Login events
-(
-    'd3ffc99-9c0b-4ef8-bb6d-6bb9bd380a14'::UUID,
-    'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'::UUID,
-    'login',
-    '192.168.1.100'::INET,
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-    'user',
-    'd3ffc99-9c0b-4ef8-bb6d-6bb9bd380a14'::UUID,
-    '{"method": "password", "success": true}'::JSONB,
-    NOW() - INTERVAL '2 hours'
-),
-(
-    'e4ffc99-9c0b-4ef8-bb6d-6bb9bd380a15'::UUID,
-    'b1ffc99-9c0b-4ef8-bb6d-6bb9bd380a12'::UUID,
-    'login',
-    '10.0.0.50'::INET,
-    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15',
-    'user',
-    'e4ffc99-9c0b-4ef8-bb6d-6bb9bd380a15'::UUID,
-    '{"method": "password", "success": true}'::JSONB,
-    NOW() - INTERVAL '1 hour'
-),
--- Registration events
-(
-    'g6ffc99-9c0b-4ef8-bb6d-6bb9bd380a17'::UUID,
-    'c2eecc99-9c0b-4ef8-bb6d-6bb9bd380a13'::UUID,
-    'register',
-    '203.0.113.10'::INET,
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-    'user',
-    'g6ffc99-9c0b-4ef8-bb6d-6bb9bd380a17'::UUID,
-    '{"source": "web", "newsletter_optin": true}'::JSONB,
-    NOW() - INTERVAL '5 days'
-),
--- Profile update events
-(
-    'f5ffc99-9c0b-4ef8-bb6d-6bb9bd380a16'::UUID,
-    'b1ffc99-9c0b-4ef8-bb6d-6bb9bd380a12'::UUID,
-    'profile_update',
-    '198.51.100.25'::INET,
-    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
-    'user',
-    'f5ffc99-9c0b-4ef8-bb6d-6bb9bd380a16'::UUID,
-    '{"fields_updated": ["store_name", "vendor_info"]}'::JSONB,
-    NOW() - INTERVAL '3 days'
-);
-
--- Insert sample failed login attempts
-INSERT INTO failed_logins (
-    email, client_id, ip_address, user_agent, created_at
-) VALUES 
-(
-    'hacker@example.com',
-    'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'::UUID,
-    '203.0.113.99'::INET,
-    'Mozilla/5.0 (compatible; BadBot/1.0)',
-    NOW() - INTERVAL '30 minutes'
-),
-(
-    'john.customer@example.com',
-    'b1ffc99-9c0b-4ef8-bb6d-6bb9bd380a12'::UUID,
-    '10.0.0.50'::INET,
-    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15',
-    NOW() - INTERVAL '2 hours'
-);
-
--- Insert sample webhook logs
-INSERT INTO webhook_logs (
-    client_id, user_id, event_type, url, request_payload, response_status, response_body, 
-    retry_count, success, error_message, duration_ms, created_at
-) VALUES 
-(
-    'b1ffc99-9c0b-4ef8-bb6d-6bb9bd380a12'::UUID,
-    'e4ffc99-9c0b-4ef8-bb6d-6bb9bd380a15'::UUID,
-    'user.register',
-    'https://api.example-store.com/auth/webhook',
-    '{
-        "event": "user.register",
-        "user_id": "e4ffc99-9c0b-4ef8-bb6d-6bb9bd380a15",
-        "email": "john.customer@example.com",
-        "timestamp": "2024-01-15T10:30:00Z"
-    }'::JSONB,
-    200,
-    '{"roles": ["customer"], "custom_claims": {"loyalty_tier": "bronze"}}',
-    0,
-    true,
-    NULL,
-    150,
-    NOW() - INTERVAL '20 days'
-),
-(
-    'b1ffc99-9c0b-4ef8-bb6d-6bb9bd380a12'::UUID,
-    'f5ffc99-9c0b-4ef8-bb6d-6bb9bd380a16'::UUID,
-    'user.login',
-    'https://api.example-store.com/auth/webhook',
-    '{
-        "event": "user.login",
-        "user_id": "f5ffc99-9c0b-4ef8-bb6d-6bb9bd380a16",
-        "email": "sarah.vendor@example.com",
-        "timestamp": "2024-01-20T14:45:00Z",
-        "device_info": {
-            "ip_address": "198.51.100.25",
-            "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
-        }
-    }'::JSONB,
-    200,
-    '{"roles": ["vendor", "admin"], "permissions": ["manage_products", "view_reports"]}',
-    0,
-    true,
-    NULL,
-    120,
-    NOW() - INTERVAL '3 days'
-),
-(
-    'c2eecc99-9c0b-4ef8-bb6d-6bb9bd380a13'::UUID,
-    'g6ffc99-9c0b-4ef8-bb6d-6bb9bd380a17'::UUID,
-    'user.register',
-    'https://api.startup.io/auth/webhook',
-    '{
-        "event": "user.register",
-        "user_id": "g6ffc99-9c0b-4ef8-bb6d-6bb9bd380a17",
-        "email": "mike@startup.io",
-        "timestamp": "2024-01-25T09:15:00Z"
-    }'::JSONB,
-    500,
-    'Internal Server Error',
     2,
-    false,
-    'Webhook endpoint returned 500 status',
-    3000,
-    NOW() - INTERVAL '5 days'
+    'admin@authsystem.com',
+    '$2a$12$JQv3c1yqBWVHxkd0g8fK0u7t7JvQW7t7G8bVc6Yf5hT0cA1bC2dE3', -- hashed "admin123"
+    'System Administrator',
+    'admin',
+    true,
+    '2024-01-20 09:15:00'
 );
 
--- Update user login statistics
-UPDATE users SET
+-- Insert Clients
+INSERT INTO clients (id, name, email, password_hash, organization_name, plan_type, is_active, client_id, client_secret) VALUES
+(
+    1,
+    'Tech Corp Inc',
+    'tech@techcorp.com',
+    '$2a$12$HQv3c1yqBWVHxkd0g8fK0u7t7JvQW7t7G8bVc6Yf5hT0cA1bC2dE3', -- hashed "client123"
+    'Tech Corporation',
+    'premium',
+    true,
+    'tech_corp_001',
+    'tech_secret_001'
+),
+(
+    2,
+    'Startup XYZ',
+    'admin@startupxyz.com',
+    '$2a$12$IQv3c1yqBWVHxkd0g8fK0u7t7JvQW7t7G8bVc6Yf5hT0cA1bC2dE3', -- hashed "client456"
+    'Startup XYZ LLC',
+    'basic',
+    true,
+    'startup_xyz_002',
+    'startup_secret_002'
+);
+
+-- Insert Client Applications
+INSERT INTO client_applications (id, client_id, name, description, client_secret, auth_mode, main_page_url, redirect_url, allowed_origins, webhook_url, role_request_webhook, default_role, roles_config) VALUES
+(
+    1,
+    1,
+    'Tech Corp Web App',
+    'Main web application for Tech Corp',
+    'app_secret_tech_001',
+    'jwt',
+    'https://app.techcorp.com',
+    'https://app.techcorp.com/auth/callback',
+    ARRAY['https://app.techcorp.com', 'https://admin.techcorp.com'],
+    'https://app.techcorp.com/webhooks/auth',
+    'https://app.techcorp.com/webhooks/role-requests',
+    'user',
+    '[
+        {"role": "user", "permissions": ["read"]},
+        {"role": "editor", "permissions": ["read", "write"]},
+        {"role": "admin", "permissions": ["read", "write", "delete", "manage_users"]}
+    ]'::jsonb
+),
+(
+    2,
+    1,
+    'Tech Corp Mobile App',
+    'Mobile application for Tech Corp',
+    'app_secret_tech_002',
+    'jwt',
+    'https://mobile.techcorp.com',
+    'https://mobile.techcorp.com/auth/callback',
+    ARRAY['https://mobile.techcorp.com'],
+    NULL,
+    NULL,
+    'user',
+    '[
+        {"role": "user", "permissions": ["read"]},
+        {"role": "premium", "permissions": ["read", "write"]}
+    ]'::jsonb
+),
+(
+    3,
+    2,
+    'Startup XYZ Platform',
+    'Main platform for Startup XYZ',
+    'app_secret_startup_003',
+    'basic',
+    'https://platform.startupxyz.com',
+    'https://platform.startupxyz.com/callback',
+    ARRAY['https://platform.startupxyz.com'],
+    NULL,
+    NULL,
+    'member',
+    '[
+        {"role": "member", "permissions": ["read"]},
+        {"role": "contributor", "permissions": ["read", "write"]},
+        {"role": "moderator", "permissions": ["read", "write", "moderate"]}
+    ]'::jsonb
+);
+
+-- Insert Users
+INSERT INTO users (id, client_id, application_id, email, password_hash, name, role, requested_role, role_request_status, metadata, is_active, email_verified) VALUES
+(
+    1,
+    1,
+    1,
+    'john.doe@techcorp.com',
+    '$2a$12$AQv3c1yqBWVHxkd0g8fK0u7t7JvQW7t7G8bVc6Yf5hT0cA1bC2dE3', -- hashed "user123"
+    'John Doe',
+    'admin',
+    NULL,
+    'none',
+    '{"department": "Engineering", "position": "Lead Developer", "phone": "+1234567890"}'::jsonb,
+    true,
+    true
+),
+(
+    2,
+    1,
+    1,
+    'jane.smith@techcorp.com',
+    '$2a$12$BQv3c1yqBWVHxkd0g8fK0u7t7JvQW7t7G8bVc6Yf5hT0cA1bC2dE3', -- hashed "user456"
+    'Jane Smith',
+    'editor',
+    NULL,
+    'none',
+    '{"department": "Marketing", "position": "Content Manager", "phone": "+1234567891"}'::jsonb,
+    true,
+    true
+),
+(
+    3,
+    1,
+    1,
+    'bob.wilson@techcorp.com',
+    '$2a$12$CQv3c1yqBWVHxkd0g8fK0u7t7JvQW7t7G8bVc6Yf5hT0cA1bC2dE3', -- hashed "user789"
+    'Bob Wilson',
+    'user',
+    'editor',
+    'pending',
+    '{"department": "Sales", "position": "Sales Representative", "phone": "+1234567892"}'::jsonb,
+    true,
+    true
+),
+(
+    4,
+    1,
+    2,
+    'alice.brown@techcorp.com',
+    '$2a$12$DQv3c1yqBWVHxkd0g8fK0u7t7JvQW7t7G8bVc6Yf5hT0cA1bC2dE3', -- hashed "user012"
+    'Alice Brown',
+    'premium',
+    NULL,
+    'none',
+    '{"department": "Product", "position": "Product Manager", "phone": "+1234567893"}'::jsonb,
+    true,
+    true
+),
+(
+    5,
+    2,
+    3,
+    'charlie.davis@startupxyz.com',
+    '$2a$12$EQv3c1yqBWVHxkd0g8fK0u7t7JvQW7t7G8bVc6Yf5hT0cA1bC2dE3', -- hashed "user345"
+    'Charlie Davis',
+    'moderator',
+    NULL,
+    'none',
+    '{"department": "Community", "position": "Community Manager", "phone": "+1234567894"}'::jsonb,
+    true,
+    true
+),
+(
+    6,
+    2,
+    3,
+    'eva.garcia@startupxyz.com',
+    '$2a$12$FQv3c1yqBWVHxkd0g8fK0u7t7JvQW7t7G8bVc6Yf5hT0cA1bC2dE3', -- hashed "user678"
+    'Eva Garcia',
+    'contributor',
+    'moderator',
+    'approved',
+    '{"department": "Content", "position": "Content Creator", "phone": "+1234567895"}'::jsonb,
+    true,
+    true
+);
+
+-- Insert Sessions
+INSERT INTO sessions (admin_id, client_id, user_id, session_type, refresh_token, expires_at, revoked) VALUES
+(
+    1,
+    NULL,
+    NULL,
+    'admin',
+    'admin_refresh_token_123',
+    NOW() + INTERVAL '7 days',
+    false
+),
+(
+    NULL,
+    1,
+    NULL,
+    'client',
+    'client_refresh_token_456',
+    NOW() + INTERVAL '1 day',
+    false
+),
+(
+    NULL,
+    NULL,
+    1,
+    'user',
+    'user_refresh_token_789',
+    NOW() + INTERVAL '30 days',
+    false
+),
+(
+    NULL,
+    NULL,
+    2,
+    'user',
+    'user_refresh_token_012',
+    NOW() - INTERVAL '1 day', -- expired
+    false
+),
+(
+    NULL,
+    NULL,
+    3,
+    'user',
+    'user_refresh_token_345',
+    NOW() + INTERVAL '15 days',
+    true
+);
+
+-- Insert Audit Logs
+INSERT INTO audit_logs (admin_id, client_id, user_id, action, resource_type, resource_id, metadata, ip_address, user_agent, created_at) VALUES
+(
+    1,
+    NULL,
+    NULL,
+    'login',
+    'admin',
+    1,
+    '{"user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)", "location": "New York, US"}'::jsonb,
+    '192.168.1.100',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+    '2024-01-20 09:00:00'
+),
+(
+    1,
+    NULL,
+    NULL,
+    'create_client',
+    'client',
+    1,
+    '{"client_name": "Tech Corp Inc", "organization": "Tech Corporation"}'::jsonb,
+    '192.168.1.100',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+    '2024-01-20 09:15:00'
+),
+(
+    NULL,
+    1,
+    NULL,
+    'login',
+    'client',
+    1,
+    '{"user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "location": "San Francisco, US"}'::jsonb,
+    '10.0.0.50',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    '2024-01-20 10:30:00'
+),
+(
+    NULL,
+    NULL,
+    1,
+    'register',
+    'user',
+    1,
+    '{"application": "Tech Corp Web App", "role": "admin"}'::jsonb,
+    '172.16.1.200',
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)',
+    '2024-01-20 11:00:00'
+),
+(
+    2,
+    NULL,
+    NULL,
+    'review_admin_request',
+    'admin_request',
+    2,
+    '{"request_email": "reviewed.admin@org.com", "decision": "approved", "reason": "Valid business need"}'::jsonb,
+    '192.168.1.101',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+    '2024-01-12 09:15:00'
+);
+
+-- Update sequences to avoid conflicts with future inserts
+SELECT setval('admins_id_seq', (SELECT MAX(id) FROM admins));
+SELECT setval('clients_id_seq', (SELECT MAX(id) FROM clients));
+SELECT setval('client_applications_id_seq', (SELECT MAX(id) FROM client_applications));
+SELECT setval('users_id_seq', (SELECT MAX(id) FROM users));
+SELECT setval('sessions_id_seq', (SELECT MAX(id) FROM sessions));
+SELECT setval('audit_logs_id_seq', (SELECT MAX(id) FROM audit_logs));
