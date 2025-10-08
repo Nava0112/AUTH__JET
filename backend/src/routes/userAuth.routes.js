@@ -1,51 +1,63 @@
 const express = require('express');
-const { authenticateUser, authenticateApplication, requireRole } = require('../middleware/multiTenantAuth');
-const { createUserRateLimit } = require('../middleware/rateLimit');
+const { authenticateUser } = require('../middleware/userAuth');
 const userAuthController = require('../controllers/userAuth.controller');
+const database = require('../utils/database');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
-// Apply rate limiting to all user auth routes
-router.use(createUserRateLimit(200, 15)); // 200 requests per 15 minutes
+// Public routes - no authentication required
+router.post('/register', userAuthController.register.bind(userAuthController));
+router.post('/login', userAuthController.login.bind(userAuthController));
+router.post('/refresh-token', userAuthController.refreshToken.bind(userAuthController));
+router.post('/verify-email', userAuthController.verifyEmail.bind(userAuthController));
+router.post('/resend-verification', userAuthController.resendVerificationEmail.bind(userAuthController));
 
-// Application-based authentication (requires application credentials)
-router.use('/app', authenticateApplication);
+// Client application info endpoint
+router.get('/applications/:application_id', async (req, res) => {
+  try {
+    const { application_id } = req.params;
+    const client_id = req.query.client_id;
 
-// User authentication routes for client applications
-router.post('/app/register', userAuthController.register);
-router.post('/app/login', userAuthController.login);
-router.post('/app/forgot-password', userAuthController.forgotPassword);
-router.post('/app/reset-password', userAuthController.resetPassword);
-router.post('/app/verify-email', userAuthController.verifyEmail);
-router.post('/app/refresh-token', userAuthController.refreshToken);
+    if (!client_id) {
+      return res.status(400).json({
+        error: 'client_id query parameter is required',
+        code: 'MISSING_CLIENT_ID',
+      });
+    }
 
-// Protected user routes (requires user token)
-router.use('/user', authenticateUser);
+    const query = `
+      SELECT id, name, description, logo_url, auth_mode, available_roles, default_user_role
+      FROM client_applications 
+      WHERE id = $1 AND client_id = $2 AND is_active = true
+    `;
+    
+    const result = await database.query(query, [application_id, client_id]);
 
-// User profile management
-router.get('/user/profile', userAuthController.getProfile);
-router.put('/user/profile', userAuthController.updateProfile);
-router.post('/user/change-password', userAuthController.changePassword);
-router.post('/user/logout', userAuthController.logout);
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        error: 'Application not found',
+        code: 'APPLICATION_NOT_FOUND',
+      });
+    }
 
-// User session management
-router.get('/user/sessions', userAuthController.getSessions);
-router.delete('/user/sessions/:sessionId', userAuthController.revokeSession);
-router.delete('/user/sessions', userAuthController.revokeAllSessions);
+    res.json({ application: result.rows[0] });
+  } catch (error) {
+    logger.error('Get application info error:', error);
+    res.status(500).json({
+      error: 'Failed to fetch application info',
+      details: error.message
+    });
+  }
+});
 
-// User activity and audit logs
-router.get('/user/activity', userAuthController.getActivity);
+// Protected routes - require user authentication
+router.use(authenticateUser);
 
-// Role-based routes (for advanced auth applications)
-router.get('/user/permissions', userAuthController.getPermissions);
-
-// Application-specific user data
-router.get('/user/custom-data', userAuthController.getCustomData);
-router.put('/user/custom-data', userAuthController.updateCustomData);
-
-// OAuth routes (if client application supports OAuth)
-router.get('/oauth/authorize', userAuthController.oauthAuthorize);
-router.post('/oauth/token', userAuthController.oauthToken);
-router.post('/oauth/revoke', userAuthController.oauthRevoke);
+router.get('/profile', userAuthController.getProfile.bind(userAuthController));
+router.post('/logout', userAuthController.logout.bind(userAuthController));
+router.post('/:user_id/request-role', userAuthController.requestRoleUpgrade.bind(userAuthController));
+router.get('/:user_id/role-requests', userAuthController.getRoleRequests.bind(userAuthController));
+router.put('/profile', userAuthController.updateProfile.bind(userAuthController));
 
 module.exports = router;

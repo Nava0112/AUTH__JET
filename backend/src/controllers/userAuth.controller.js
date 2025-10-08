@@ -1,103 +1,124 @@
 const crypto = require('../utils/crypto');
 const database = require('../utils/database');
 const logger = require('../utils/logger');
-const jwtService = require('../services/jwt.service');
+const userJwtService = require('../services/userJwt.service');
 const emailService = require('../services/email.service');
 
 class UserAuthController {
   async register(req, res, next) {
-    const { email, password, name, roles = ['user'], custom_data = {} } = req.body;
+    const { email, password, name, client_id, application_id } = req.body;
     
     try {
-      // Application is already authenticated via middleware
-      const application = req.application;
+      // Validate required fields
+      if (!email || !password || !client_id || !application_id) {
+        return res.status(400).json({
+          error: 'Email, password, client_id, and application_id are required',
+          code: 'MISSING_REQUIRED_FIELDS',
+        });
+      }
 
-      // Check if user already exists in this application
+      // Verify client and application exist and are active
+      const appQuery = `
+        SELECT ca.*, c.name as client_name, c.plan_type, ca.default_user_role,
+               ca.available_roles, ca.auth_mode
+        FROM client_applications ca
+        JOIN clients c ON ca.client_id = c.id
+        WHERE ca.id = $1 AND ca.client_id = $2 AND ca.is_active = true AND c.is_active = true
+      `;
+      
+      const appResult = await database.query(appQuery, [application_id, client_id]);
+      
+      if (appResult.rows.length === 0) {
+        return res.status(400).json({
+          error: 'Invalid client application',
+          code: 'INVALID_APPLICATION',
+        });
+      }
+
+      const application = appResult.rows[0];
+
+      // Check if user already exists for this application
       const existingQuery = `
         SELECT id FROM users 
-        WHERE application_id = $1 AND email = $2
+        WHERE email = $1 AND client_id = $2 AND application_id = $3
       `;
-      const existing = await database.query(existingQuery, [application.id, email]);
+      
+      const existing = await database.query(existingQuery, [email, client_id, application_id]);
       
       if (existing.rows.length > 0) {
         return res.status(409).json({
-          error: 'User with this email already exists in this application',
+          error: 'User already exists for this application',
           code: 'USER_EXISTS',
         });
       }
 
-      // Validate roles against application's available roles
-      const availableRoles = application.settings?.available_roles || ['user', 'admin'];
-      const invalidRoles = roles.filter(role => !availableRoles.includes(role));
-      
-      if (invalidRoles.length > 0) {
-        return res.status(400).json({
-          error: `Invalid roles: ${invalidRoles.join(', ')}`,
-          code: 'INVALID_ROLES',
-        });
-      }
-
-      // Hash password
+      // Hash password and create user
       const passwordHash = await crypto.hashPassword(password);
+      
+      // Determine default role based on application type
+      const defaultRole = application.default_user_role || 'user';
+      const availableRoles = application.available_roles || ['user'];
+      
+      // Ensure default role is in available roles
+      const finalRole = availableRoles.includes(defaultRole) ? defaultRole : 'user';
 
-      // Create user
       const insertQuery = `
         INSERT INTO users (
-          client_id, application_id, email, password_hash, name, 
-          roles, custom_data, is_active, email_verified
+          client_id, application_id, email, password_hash, name, role,
+          is_active, email_verified
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-        RETURNING id, email, name, roles, is_active, created_at
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        RETURNING id, email, name, role, created_at
       `;
       
       const result = await database.query(insertQuery, [
-        application.client_id,
-        application.id,
+        client_id,
+        application_id,
         email,
         passwordHash,
         name,
-        JSON.stringify(roles),
-        JSON.stringify(custom_data),
+        finalRole,
         true,
-        false
+        false // Email not verified yet
       ]);
 
       const user = result.rows[0];
 
-      // Send verification email if configured
+      // Send email verification
       try {
-        await emailService.sendUserVerificationEmail(
-          email, 
-          name, 
-          user.id, 
-          application.name
-        );
+        await emailService.sendUserVerificationEmail(email, name, user.id, application_id);
       } catch (emailError) {
         logger.error('Failed to send verification email:', emailError);
       }
 
-      // Log the registration
-      await database.query(`
-        INSERT INTO audit_logs (user_id, client_id, application_id, action, ip_address, user_agent)
-        VALUES ($1, $2, $3, $4, $5, $6)
-      `, [user.id, application.client_id, application.id, 'user_registered', req.ip, req.get('User-Agent')]);
-
       logger.info('User registered successfully', { 
         userId: user.id, 
-        email, 
-        applicationId: application.id 
+        clientId: client_id,
+        applicationId: application_id 
       });
 
+      // Generate tokens
+      const accessToken = await userJwtService.generateAccessToken(user, client_id, application_id);
+      const refreshToken = await userJwtService.generateRefreshToken(user.id, client_id, application_id);
+
       res.status(201).json({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+        token_type: 'Bearer',
+        expires_in: process.env.NODE_ENV === 'production' ? 3600 : 900,
         user: {
           id: user.id,
           email: user.email,
           name: user.name,
-          roles: user.roles,
-          is_active: user.is_active,
-          created_at: user.created_at,
+          role: user.role,
+          email_verified: false
         },
-        message: 'User registered successfully. Please verify your email.',
+        application: {
+          id: application_id,
+          name: application.name,
+          auth_mode: application.auth_mode,
+          available_roles: application.available_roles
+        }
       });
 
     } catch (error) {
@@ -107,37 +128,38 @@ class UserAuthController {
   }
 
   async login(req, res, next) {
-    const { email, password } = req.body;
+    const { email, password, client_id, application_id } = req.body;
     
     try {
-      const application = req.application;
+      // Validate required fields
+      if (!email || !password || !client_id || !application_id) {
+        return res.status(400).json({
+          error: 'Email, password, client_id, and application_id are required',
+          code: 'MISSING_REQUIRED_FIELDS',
+        });
+      }
 
-      // Find user in this application
+      // Find user for this specific application
       const userQuery = `
-        SELECT 
-          u.id, u.email, u.password_hash, u.name, u.roles, u.custom_data,
-          u.is_active, u.email_verified, u.last_login, u.login_count
+        SELECT u.*, ca.name as application_name, c.name as client_name,
+               ca.auth_mode, ca.available_roles
         FROM users u
-        WHERE u.application_id = $1 AND u.email = $2
+        JOIN client_applications ca ON u.application_id = ca.id
+        JOIN clients c ON u.client_id = c.id
+        WHERE u.email = $1 AND u.client_id = $2 AND u.application_id = $3
+        AND u.is_active = true AND ca.is_active = true AND c.is_active = true
       `;
       
-      const result = await database.query(userQuery, [application.id, email]);
+      const result = await database.query(userQuery, [email, client_id, application_id]);
 
       if (result.rows.length === 0) {
         return res.status(401).json({
-          error: 'Invalid credentials',
+          error: 'Invalid credentials or application',
           code: 'INVALID_CREDENTIALS',
         });
       }
 
       const user = result.rows[0];
-
-      if (!user.is_active) {
-        return res.status(401).json({
-          error: 'Account is disabled. Contact support.',
-          code: 'ACCOUNT_DISABLED',
-        });
-      }
 
       // Verify password
       const isValidPassword = await crypto.comparePassword(password, user.password_hash);
@@ -149,71 +171,40 @@ class UserAuthController {
         });
       }
 
+      // Update last login
+      await database.query(
+        'UPDATE users SET last_login = NOW() WHERE id = $1',
+        [user.id]
+      );
+
       // Generate tokens
-      const accessToken = await jwtService.generateToken(user.id, '1h');
-      const refreshToken = await jwtService.generateToken(user.id, '7d');
-
-      // Create session
-      const sessionQuery = `
-        INSERT INTO sessions (
-          user_id, client_id, application_id, session_type, 
-          token_hash, refresh_token_hash, expires_at, refresh_expires_at,
-          ip_address, user_agent
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-        RETURNING id
-      `;
-
-      const tokenHash = await crypto.hashPassword(accessToken);
-      const refreshTokenHash = await crypto.hashPassword(refreshToken);
-      const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
-      const refreshExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
-
-      await database.query(sessionQuery, [
-        user.id,
-        application.client_id,
-        application.id,
-        'user',
-        tokenHash,
-        refreshTokenHash,
-        expiresAt,
-        refreshExpiresAt,
-        req.ip,
-        req.get('User-Agent')
-      ]);
-
-      // Update login stats
-      await database.query(`
-        UPDATE users 
-        SET last_login = NOW(), login_count = login_count + 1 
-        WHERE id = $1
-      `, [user.id]);
-
-      // Log the login
-      await database.query(`
-        INSERT INTO audit_logs (user_id, client_id, application_id, action, ip_address, user_agent)
-        VALUES ($1, $2, $3, $4, $5, $6)
-      `, [user.id, application.client_id, application.id, 'user_login', req.ip, req.get('User-Agent')]);
+      const accessToken = await userJwtService.generateAccessToken(user, client_id, application_id);
+      const refreshToken = await userJwtService.generateRefreshToken(user.id, client_id, application_id);
 
       logger.info('User login successful', { 
         userId: user.id, 
-        email, 
-        applicationId: application.id 
+        clientId: client_id,
+        applicationId: application_id 
       });
 
       res.json({
         access_token: accessToken,
         refresh_token: refreshToken,
         token_type: 'Bearer',
-        expires_in: 3600,
+        expires_in: process.env.NODE_ENV === 'production' ? 3600 : 900,
         user: {
           id: user.id,
           email: user.email,
           name: user.name,
-          roles: user.roles,
-          custom_data: user.custom_data,
-          email_verified: user.email_verified,
+          role: user.role,
+          email_verified: user.email_verified
         },
+        application: {
+          id: application_id,
+          name: user.application_name,
+          auth_mode: user.auth_mode,
+          available_roles: user.available_roles
+        }
       });
 
     } catch (error) {
@@ -233,86 +224,158 @@ class UserAuthController {
         });
       }
 
-      // Verify refresh token
-      const decoded = await jwtService.verifyToken(refresh_token);
+      const tokens = await userJwtService.refreshTokens(refresh_token);
+
+      res.json(tokens);
+
+    } catch (error) {
+      logger.error('Token refresh error:', error);
       
-      // Find valid session
-      const sessionQuery = `
-        SELECT s.*, u.email, u.name, u.roles, u.custom_data, u.is_active
-        FROM sessions s
-        JOIN users u ON s.user_id = u.id
-        WHERE s.user_id = $1 AND s.session_type = 'user' 
-        AND s.refresh_expires_at > NOW() AND s.revoked = false
-        AND s.application_id = $2
-      `;
-      
-      const sessionResult = await database.query(sessionQuery, [decoded.sub, req.application.id]);
-      
-      if (sessionResult.rows.length === 0) {
+      if (error.message.includes('Invalid or expired') || error.message.includes('exceeded maximum uses')) {
         return res.status(401).json({
-          error: 'Invalid or expired refresh token',
+          error: error.message,
           code: 'INVALID_REFRESH_TOKEN',
         });
       }
-
-      const session = sessionResult.rows[0];
-
-      if (!session.is_active) {
-        return res.status(401).json({
-          error: 'User account is disabled',
-          code: 'ACCOUNT_DISABLED',
-        });
-      }
-
-      // Generate new tokens
-      const newAccessToken = await jwtService.generateToken(session.user_id, '1h');
-      const newRefreshToken = await jwtService.generateToken(session.user_id, '7d');
-
-      // Update session with new tokens
-      const newTokenHash = await crypto.hashPassword(newAccessToken);
-      const newRefreshTokenHash = await crypto.hashPassword(newRefreshToken);
-      const newExpiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
-      const newRefreshExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
-
-      await database.query(`
-        UPDATE sessions 
-        SET token_hash = $1, refresh_token_hash = $2, 
-            expires_at = $3, refresh_expires_at = $4, updated_at = NOW()
-        WHERE id = $5
-      `, [newTokenHash, newRefreshTokenHash, newExpiresAt, newRefreshExpiresAt, session.id]);
-
-      res.json({
-        access_token: newAccessToken,
-        refresh_token: newRefreshToken,
-        token_type: 'Bearer',
-        expires_in: 3600,
-        user: {
-          id: session.user_id,
-          email: session.email,
-          name: session.name,
-          roles: session.roles,
-          custom_data: session.custom_data,
-        },
-      });
-
-    } catch (error) {
-      logger.error('Refresh token error:', error);
+      
       next(error);
     }
   }
 
-  async getProfile(req, res, next) {
+  async requestRoleUpgrade(req, res, next) {
+    const { user_id } = req.params;
+    const { requested_role } = req.body;
+    
     try {
+      // Verify user exists and belongs to this application
       const userQuery = `
-        SELECT 
-          id, email, name, roles, custom_data, is_active, 
-          email_verified, last_login, login_count, created_at, updated_at
-        FROM users 
-        WHERE id = $1
+        SELECT u.*, ca.auth_mode, ca.available_roles, ca.default_user_role,
+               c.email as client_email, c.name as client_name
+        FROM users u
+        JOIN client_applications ca ON u.application_id = ca.id
+        JOIN clients c ON u.client_id = c.id
+        WHERE u.id = $1 AND u.client_id = $2 AND u.application_id = $3
       `;
       
-      const result = await database.query(userQuery, [req.user.id]);
+      const userResult = await database.query(userQuery, [
+        user_id, 
+        req.user.client_id, 
+        req.user.application_id
+      ]);
+
+      if (userResult.rows.length === 0) {
+        return res.status(404).json({
+          error: 'User not found',
+          code: 'USER_NOT_FOUND',
+        });
+      }
+
+      const user = userResult.rows[0];
+
+      // Check if application supports role management
+      if (user.auth_mode !== 'advanced') {
+        return res.status(400).json({
+          error: 'Role management not supported for this application',
+          code: 'ROLES_NOT_SUPPORTED',
+        });
+      }
+
+      // Check if requested role is valid
+      const availableRoles = user.available_roles || [];
+      if (!availableRoles.includes(requested_role)) {
+        return res.status(400).json({
+          error: 'Invalid role requested',
+          code: 'INVALID_ROLE',
+        });
+      }
+
+      // Check if user already has this role or higher
+      if (user.role === requested_role) {
+        return res.status(400).json({
+          error: 'User already has this role',
+          code: 'ALREADY_HAS_ROLE',
+        });
+      }
+
+      // Create role request
+      const requestQuery = `
+        INSERT INTO user_role_requests (
+          user_id, client_id, application_id, current_role, requested_role,
+          status, expires_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        RETURNING id
+      `;
       
+      const expiresAt = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000); // 3 days
+      
+      await database.query(requestQuery, [
+        user_id,
+        req.user.client_id,
+        req.user.application_id,
+        user.role,
+        requested_role,
+        'pending',
+        expiresAt
+      ]);
+
+      // Send email to client admin
+      try {
+        await emailService.sendRoleRequestEmail(
+          user.client_email,
+          user.client_name,
+          user.email,
+          user.name,
+          user.role,
+          requested_role,
+          expiresAt
+        );
+      } catch (emailError) {
+        logger.error('Failed to send role request email:', emailError);
+      }
+
+      logger.info('Role upgrade requested', {
+        userId: user_id,
+        clientId: req.user.client_id,
+        applicationId: req.user.application_id,
+        requestedRole: requested_role
+      });
+
+      res.json({
+        message: 'Role upgrade request submitted. Client admin will review within 3 days.',
+        expires_at: expiresAt
+      });
+
+    } catch (error) {
+      logger.error('Role request error:', error);
+      next(error);
+    }
+  }
+
+  async verifyEmail(req, res, next) {
+    const { token } = req.body;
+    
+    try {
+      if (!token) {
+        return res.status(400).json({
+          error: 'Verification token required',
+          code: 'MISSING_VERIFICATION_TOKEN',
+        });
+      }
+
+      // In a real implementation, you'd verify the JWT token and extract user ID
+      // For now, let's assume token contains user ID (you'd use JWT in production)
+      const userId = parseInt(token); // This is simplified - use JWT in production
+      
+      const query = `
+        UPDATE users 
+        SET email_verified = true, updated_at = NOW()
+        WHERE id = $1
+        RETURNING id, email, email_verified
+      `;
+      
+      const result = await database.query(query, [userId]);
+
       if (result.rows.length === 0) {
         return res.status(404).json({
           error: 'User not found',
@@ -320,7 +383,76 @@ class UserAuthController {
         });
       }
 
-      res.json({ user: result.rows[0] });
+      logger.info('Email verified successfully', { userId });
+
+      res.json({
+        message: 'Email verified successfully',
+        user: result.rows[0]
+      });
+
+    } catch (error) {
+      logger.error('Email verification error:', error);
+      next(error);
+    }
+  }
+
+  async getProfile(req, res, next) {
+    try {
+      const user_id = req.user?.id;
+      
+      if (!user_id) {
+        return res.status(401).json({
+          error: 'User authentication required',
+          code: 'USER_AUTH_REQUIRED',
+        });
+      }
+
+      const query = `
+        SELECT 
+          u.id, u.email, u.name, u.role, u.email_verified, u.last_login,
+          u.created_at, u.updated_at,
+          ca.name as application_name, c.name as client_name,
+          ca.auth_mode, ca.available_roles
+        FROM users u
+        JOIN client_applications ca ON u.application_id = ca.id
+        JOIN clients c ON u.client_id = c.id
+        WHERE u.id = $1 AND u.client_id = $2 AND u.application_id = $3
+      `;
+      
+      const result = await database.query(query, [
+        user_id, 
+        req.user.client_id, 
+        req.user.application_id
+      ]);
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({
+          error: 'User profile not found',
+          code: 'PROFILE_NOT_FOUND',
+        });
+      }
+
+      const user = result.rows[0];
+
+      res.json({
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          email_verified: user.email_verified,
+          last_login: user.last_login,
+          created_at: user.created_at,
+          application: {
+            name: user.application_name,
+            auth_mode: user.auth_mode,
+            available_roles: user.available_roles
+          },
+          client: {
+            name: user.client_name
+          }
+        }
+      });
 
     } catch (error) {
       logger.error('Get user profile error:', error);
@@ -328,282 +460,29 @@ class UserAuthController {
     }
   }
 
-  async updateProfile(req, res, next) {
-    try {
-      const { name, custom_data } = req.body;
-      const updates = {};
-      const params = [];
-      let paramCount = 0;
-
-      if (name !== undefined) {
-        paramCount++;
-        updates[`name = $${paramCount}`] = true;
-        params.push(name);
-      }
-
-      if (custom_data !== undefined) {
-        paramCount++;
-        updates[`custom_data = $${paramCount}`] = true;
-        params.push(JSON.stringify(custom_data));
-      }
-
-      if (Object.keys(updates).length === 0) {
-        return res.status(400).json({
-          error: 'No valid fields to update',
-          code: 'NO_VALID_FIELDS',
-        });
-      }
-
-      paramCount++;
-      params.push(req.user.id);
-
-      const query = `
-        UPDATE users 
-        SET ${Object.keys(updates).join(', ')}, updated_at = NOW()
-        WHERE id = $${paramCount}
-        RETURNING id, email, name, roles, custom_data, updated_at
-      `;
-
-      const result = await database.query(query, params);
-
-      logger.info('User profile updated', { userId: req.user.id });
-
-      res.json({ user: result.rows[0] });
-
-    } catch (error) {
-      logger.error('Update user profile error:', error);
-      next(error);
-    }
-  }
-
-  async changePassword(req, res, next) {
-    const { current_password, new_password } = req.body;
-    
-    try {
-      // Get current password hash
-      const userQuery = 'SELECT password_hash FROM users WHERE id = $1';
-      const result = await database.query(userQuery, [req.user.id]);
-      
-      if (result.rows.length === 0) {
-        return res.status(404).json({
-          error: 'User not found',
-          code: 'USER_NOT_FOUND',
-        });
-      }
-
-      // Verify current password
-      const isValidPassword = await crypto.comparePassword(current_password, result.rows[0].password_hash);
-      
-      if (!isValidPassword) {
-        return res.status(400).json({
-          error: 'Current password is incorrect',
-          code: 'INVALID_CURRENT_PASSWORD',
-        });
-      }
-
-      // Hash new password
-      const newPasswordHash = await crypto.hashPassword(new_password);
-
-      // Update password
-      await database.query(
-        'UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2',
-        [newPasswordHash, req.user.id]
-      );
-
-      // Revoke all other sessions for security
-      await database.query(`
-        UPDATE sessions 
-        SET revoked = true, revoked_at = NOW() 
-        WHERE user_id = $1 AND session_type = 'user'
-      `, [req.user.id]);
-
-      // Log the password change
-      await database.query(`
-        INSERT INTO audit_logs (user_id, client_id, application_id, action, ip_address, user_agent)
-        VALUES ($1, $2, $3, $4, $5, $6)
-      `, [req.user.id, req.user.client_id, req.user.application_id, 'password_changed', req.ip, req.get('User-Agent')]);
-
-      logger.info('User password changed', { userId: req.user.id });
-
-      res.json({ message: 'Password changed successfully. Please log in again.' });
-
-    } catch (error) {
-      logger.error('Change password error:', error);
-      next(error);
-    }
-  }
-
-  async getSessions(req, res, next) {
-    try {
-      const sessionsQuery = `
-        SELECT 
-          id, ip_address, user_agent, created_at, expires_at,
-          CASE WHEN expires_at > NOW() AND revoked = false THEN true ELSE false END as is_active
-        FROM sessions 
-        WHERE user_id = $1 AND session_type = 'user'
-        ORDER BY created_at DESC
-        LIMIT 20
-      `;
-      
-      const result = await database.query(sessionsQuery, [req.user.id]);
-
-      res.json({ sessions: result.rows });
-
-    } catch (error) {
-      logger.error('Get user sessions error:', error);
-      next(error);
-    }
-  }
-
-  async revokeSession(req, res, next) {
-    try {
-      const { sessionId } = req.params;
-
-      const query = `
-        UPDATE sessions 
-        SET revoked = true, revoked_at = NOW()
-        WHERE id = $1 AND user_id = $2 AND session_type = 'user'
-        RETURNING id
-      `;
-
-      const result = await database.query(query, [sessionId, req.user.id]);
-
-      if (result.rows.length === 0) {
-        return res.status(404).json({
-          error: 'Session not found',
-          code: 'SESSION_NOT_FOUND',
-        });
-      }
-
-      res.json({ message: 'Session revoked successfully' });
-
-    } catch (error) {
-      logger.error('Revoke session error:', error);
-      next(error);
-    }
-  }
-
-  async revokeAllSessions(req, res, next) {
-    try {
-      await database.query(`
-        UPDATE sessions 
-        SET revoked = true, revoked_at = NOW()
-        WHERE user_id = $1 AND session_type = 'user'
-      `, [req.user.id]);
-
-      res.json({ message: 'All sessions revoked successfully' });
-
-    } catch (error) {
-      logger.error('Revoke all sessions error:', error);
-      next(error);
-    }
-  }
-
-  async getActivity(req, res, next) {
-    try {
-      const { page = 1, limit = 20 } = req.query;
-      const offset = (page - 1) * limit;
-
-      const activityQuery = `
-        SELECT action, ip_address, user_agent, metadata, created_at
-        FROM audit_logs 
-        WHERE user_id = $1
-        ORDER BY created_at DESC
-        LIMIT $2 OFFSET $3
-      `;
-
-      const result = await database.query(activityQuery, [req.user.id, limit, offset]);
-
-      res.json({ activity: result.rows });
-
-    } catch (error) {
-      logger.error('Get user activity error:', error);
-      next(error);
-    }
-  }
-
-  async getPermissions(req, res, next) {
-    try {
-      // For advanced auth applications, return detailed permissions
-      // For basic auth, return simple role-based permissions
-      
-      const permissions = {
-        roles: req.user.roles,
-        auth_type: req.user.auth_type,
-        permissions: []
-      };
-
-      if (req.user.auth_type === 'advanced') {
-        // TODO: Implement advanced permission system
-        permissions.permissions = ['read', 'write']; // Placeholder
-      } else {
-        // Basic permissions based on roles
-        if (req.user.roles.includes('admin')) {
-          permissions.permissions = ['read', 'write', 'delete', 'manage_users'];
-        } else {
-          permissions.permissions = ['read'];
-        }
-      }
-
-      res.json({ permissions });
-
-    } catch (error) {
-      logger.error('Get user permissions error:', error);
-      next(error);
-    }
-  }
-
-  async getCustomData(req, res, next) {
-    try {
-      const userQuery = 'SELECT custom_data FROM users WHERE id = $1';
-      const result = await database.query(userQuery, [req.user.id]);
-      
-      if (result.rows.length === 0) {
-        return res.status(404).json({
-          error: 'User not found',
-          code: 'USER_NOT_FOUND',
-        });
-      }
-
-      res.json({ custom_data: result.rows[0].custom_data });
-
-    } catch (error) {
-      logger.error('Get custom data error:', error);
-      next(error);
-    }
-  }
-
-  async updateCustomData(req, res, next) {
-    try {
-      const { custom_data } = req.body;
-
-      const query = `
-        UPDATE users 
-        SET custom_data = $1, updated_at = NOW()
-        WHERE id = $2
-        RETURNING custom_data
-      `;
-
-      const result = await database.query(query, [JSON.stringify(custom_data), req.user.id]);
-
-      res.json({ custom_data: result.rows[0].custom_data });
-
-    } catch (error) {
-      logger.error('Update custom data error:', error);
-      next(error);
-    }
-  }
-
   async logout(req, res, next) {
     try {
-      // Revoke current session
-      await database.query(`
-        UPDATE sessions 
-        SET revoked = true, revoked_at = NOW()
-        WHERE user_id = $1 AND session_type = 'user' AND expires_at > NOW() AND revoked = false
-      `, [req.user.id]);
+      const { refresh_token } = req.body;
+      const user_id = req.user?.id;
 
-      logger.info('User logout successful', { userId: req.user.id });
+      if (refresh_token) {
+        await userJwtService.revokeRefreshToken(refresh_token);
+      }
+
+      if (user_id) {
+        // Revoke all sessions for this user in this application
+        await userJwtService.revokeAllUserSessions(
+          user_id, 
+          req.user.client_id, 
+          req.user.application_id
+        );
+      }
+
+      logger.info('User logout successful', { 
+        userId: user_id,
+        clientId: req.user?.client_id,
+        applicationId: req.user?.application_id
+      });
 
       res.json({ message: 'Logged out successfully' });
 
@@ -613,54 +492,141 @@ class UserAuthController {
     }
   }
 
-  async forgotPassword(req, res, next) {
+  async resendVerificationEmail(req, res, next) {
+    const { user_id, email } = req.body;
+    
     try {
-      res.json({ message: 'Forgot password endpoint - to be implemented' });
+      if (!user_id && !email) {
+        return res.status(400).json({
+          error: 'User ID or email required',
+          code: 'MISSING_IDENTIFIER',
+        });
+      }
+
+      let query = 'SELECT id, email, name, email_verified FROM users WHERE ';
+      let params = [];
+      
+      if (user_id) {
+        query += 'id = $1';
+        params.push(user_id);
+      } else {
+        query += 'email = $1';
+        params.push(email);
+      }
+
+      const result = await database.query(query, params);
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({
+          error: 'User not found',
+          code: 'USER_NOT_FOUND',
+        });
+      }
+
+      const user = result.rows[0];
+
+      if (user.email_verified) {
+        return res.status(400).json({
+          error: 'Email already verified',
+          code: 'EMAIL_ALREADY_VERIFIED',
+        });
+      }
+
+      // Send verification email
+      await emailService.sendUserVerificationEmail(
+        user.email, 
+        user.name, 
+        user.id,
+        req.query.application_id
+      );
+
+      logger.info('Verification email resent', { userId: user.id });
+
+      res.json({ 
+        message: 'Verification email sent successfully',
+        email: user.email 
+      });
+
     } catch (error) {
+      logger.error('Resend verification error:', error);
       next(error);
     }
   }
 
-  async resetPassword(req, res, next) {
+  async getRoleRequests(req, res, next) {
+    const { user_id } = req.params;
+    
     try {
-      res.json({ message: 'Reset password endpoint - to be implemented' });
+      const query = `
+        SELECT 
+          id, current_role, requested_role, status, admin_notes,
+          created_at, reviewed_at, expires_at
+        FROM user_role_requests 
+        WHERE user_id = $1 AND client_id = $2 AND application_id = $3
+        ORDER BY created_at DESC
+      `;
+      
+      const result = await database.query(query, [
+        user_id, 
+        req.user.client_id, 
+        req.user.application_id
+      ]);
+
+      res.json({ requests: result.rows });
+
     } catch (error) {
+      logger.error('Get role requests error:', error);
       next(error);
     }
   }
 
-  async verifyEmail(req, res, next) {
+  async updateProfile(req, res, next) {
+    const { name } = req.body;
+    const user_id = req.user.id;
+    
     try {
-      res.json({ message: 'Verify email endpoint - to be implemented' });
-    } catch (error) {
-      next(error);
-    }
-  }
+      if (!name) {
+        return res.status(400).json({
+          error: 'Name is required',
+          code: 'MISSING_NAME',
+        });
+      }
 
-  // OAuth and other methods would be implemented here
-  async oauthAuthorize(req, res, next) {
-    try {
-      res.json({ message: 'OAuth authorize endpoint - to be implemented' });
-    } catch (error) {
-      next(error);
-    }
-  }
+      const query = `
+        UPDATE users 
+        SET name = $1, updated_at = NOW()
+        WHERE id = $2 AND client_id = $3 AND application_id = $4
+        RETURNING id, email, name, role, email_verified
+      `;
+      
+      const result = await database.query(query, [
+        name,
+        user_id,
+        req.user.client_id,
+        req.user.application_id
+      ]);
 
-  async oauthToken(req, res, next) {
-    try {
-      res.json({ message: 'OAuth token endpoint - to be implemented' });
-    } catch (error) {
-      next(error);
-    }
-  }
+      if (result.rows.length === 0) {
+        return res.status(404).json({
+          error: 'User not found',
+          code: 'USER_NOT_FOUND',
+        });
+      }
 
-  async oauthRevoke(req, res, next) {
-    try {
-      res.json({ message: 'OAuth revoke endpoint - to be implemented' });
+      logger.info('User profile updated', { userId: user_id });
+
+      res.json({ 
+        message: 'Profile updated successfully',
+        user: result.rows[0]
+      });
+
     } catch (error) {
+      logger.error('Update profile error:', error);
       next(error);
     }
   }
 }
 
-module.exports = new UserAuthController();
+// Create instance and export
+const userAuthController = new UserAuthController();
+module.exports = userAuthController;

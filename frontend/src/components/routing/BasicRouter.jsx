@@ -9,6 +9,13 @@ import WorkingClientRegister from '../../pages/client/WorkingClientRegister';
 import WorkingClientDashboard from '../../pages/client/WorkingClientDashboard';
 import CreateApplication from '../../pages/client/CreateApplication';
 
+// Import the new user pages we created
+import UserLogin from '../../pages/user/UserLogin';
+import UserRegister from '../../pages/user/UserRegister';
+import VerifyEmail from '../../pages/user/VerifyEmail';
+import UserProfile from '../../pages/user/UserProfile';
+import RoleManagement from '../../pages/user/RoleManagement';
+
 // Simple fallback components
 const ComingSoon = ({ title = "Coming Soon" }) => (
   <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -37,12 +44,20 @@ const NotFound = () => (
   <div className="min-h-screen flex items-center justify-center bg-gray-50">
     <div className="text-center">
       <h2 className="text-2xl font-bold text-gray-900 mb-4">Page Not Found</h2>
-      <button
-        onClick={() => window.location.href = '/'}
-        className="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700"
-      >
-        Go to Login
-      </button>
+      <div className="space-y-3">
+        <button
+          onClick={() => window.location.href = '/'}
+          className="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 block w-full"
+        >
+          Go to Client Login
+        </button>
+        <button
+          onClick={() => window.location.href = '/user/login?client_id=3&application_id=12'}
+          className="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 block w-full"
+        >
+          Test Dark Dragon User Login
+        </button>
+      </div>
     </div>
   </div>
 );
@@ -53,16 +68,23 @@ const BasicRouter = () => {
       {/* Base route - Client Login */}
       <Route path="/" element={<SimpleClientLogin />} />
       
-      {/* Client Routes */}
+      {/* Client Routes (Organizations using AuthJet) */}
       <Route path="/client/login" element={<SimpleClientLogin />} />
       <Route path="/client/register" element={<WorkingClientRegister />} />
       <Route path="/client/dashboard" element={<WorkingClientDashboard />} />
       <Route path="/client/create-application" element={<CreateApplication />} />
       
-      {/* Admin Routes */}
+      {/* Admin Routes (AuthJet Platform Admins) */}
       <Route path="/admin/login" element={<WorkingAdminLogin />} />
       <Route path="/admin/register" element={<WorkingAdminRegister />} />
       <Route path="/admin/dashboard" element={<WorkingAdminDashboard />} />
+      
+      {/* 👇 NEW: User Routes (End-users of your clients' apps) */}
+      <Route path="/user/login" element={<UserLogin />} />
+      <Route path="/user/register" element={<UserRegister />} />
+      <Route path="/user/verify-email" element={<VerifyEmail />} />
+      <Route path="/user/profile" element={<UserProfile />} />
+      <Route path="/user/roles" element={<RoleManagement />} />
       
       {/* Setup and Status Pages */}
       <Route path="/setup" element={<SetupStatus />} />
