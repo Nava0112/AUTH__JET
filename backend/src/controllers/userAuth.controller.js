@@ -5,6 +5,41 @@ const userJwtService = require('../services/userJwt.service');
 const emailService = require('../services/email.service');
 
 class UserAuthController {
+  
+  // Helper method to extract roles from roles_config JSONB
+  extractRolesFromConfig(rolesConfig) {
+    let available_roles = ['user'];
+    let default_user_role = 'user';
+
+    if (rolesConfig) {
+      try {
+        const roles = typeof rolesConfig === 'string' 
+          ? JSON.parse(rolesConfig) 
+          : rolesConfig;
+        
+        if (Array.isArray(roles) && roles.length > 0) {
+          // Extract available role names
+          available_roles = roles.map(role => role.name).filter(Boolean);
+          
+          // Find default role: first by isDefault flag, then by lowest hierarchy
+          const defaultRoleByFlag = roles.find(role => role.isDefault === true);
+          
+          if (defaultRoleByFlag) {
+            default_user_role = defaultRoleByFlag.name;
+          } else {
+            // Use the role with lowest hierarchy as fallback
+            const sortedByHierarchy = [...roles].sort((a, b) => (a.hierarchy || 0) - (b.hierarchy || 0));
+            default_user_role = sortedByHierarchy[0].name;
+          }
+        }
+      } catch (error) {
+        console.warn('Failed to parse roles_config:', error);
+      }
+    }
+
+    return { available_roles, default_user_role };
+  }
+
   async register(req, res, next) {
     const { email, password, name, client_id, application_id } = req.body;
     
@@ -19,8 +54,13 @@ class UserAuthController {
 
       // Verify client and application exist and are active
       const appQuery = `
-        SELECT ca.*, c.name as client_name, c.plan_type, ca.default_user_role,
-               ca.available_roles, ca.auth_mode
+        SELECT 
+          ca.*, 
+          c.name as client_name, 
+          c.plan_type, 
+          ca.roles_config,
+          ca.auth_mode,
+          ca.default_role
         FROM client_applications ca
         JOIN clients c ON ca.client_id = c.id
         WHERE ca.id = $1 AND ca.client_id = $2 AND ca.is_active = true AND c.is_active = true
@@ -36,6 +76,9 @@ class UserAuthController {
       }
 
       const application = appResult.rows[0];
+
+      // Extract roles from roles_config
+      const { available_roles, default_user_role } = this.extractRolesFromConfig(application.roles_config);
 
       // Check if user already exists for this application
       const existingQuery = `
@@ -55,12 +98,8 @@ class UserAuthController {
       // Hash password and create user
       const passwordHash = await crypto.hashPassword(password);
       
-      // Determine default role based on application type
-      const defaultRole = application.default_user_role || 'user';
-      const availableRoles = application.available_roles || ['user'];
-      
       // Ensure default role is in available roles
-      const finalRole = availableRoles.includes(defaultRole) ? defaultRole : 'user';
+      const finalRole = available_roles.includes(default_user_role) ? default_user_role : 'user';
 
       const insertQuery = `
         INSERT INTO users (
@@ -117,7 +156,8 @@ class UserAuthController {
           id: application_id,
           name: application.name,
           auth_mode: application.auth_mode,
-          available_roles: application.available_roles
+          available_roles: available_roles,
+          default_user_role: default_user_role
         }
       });
 
@@ -139,10 +179,15 @@ class UserAuthController {
         });
       }
 
-      // Find user for this specific application
+      // Find user for this specific application - FIXED QUERY
       const userQuery = `
-        SELECT u.*, ca.name as application_name, c.name as client_name,
-               ca.auth_mode, ca.available_roles
+        SELECT 
+          u.*, 
+          ca.name as application_name, 
+          c.name as client_name,
+          ca.auth_mode,
+          ca.roles_config,
+          ca.default_role
         FROM users u
         JOIN client_applications ca ON u.application_id = ca.id
         JOIN clients c ON u.client_id = c.id
@@ -160,6 +205,9 @@ class UserAuthController {
       }
 
       const user = result.rows[0];
+
+      // Extract roles for the response
+      const { available_roles, default_user_role } = this.extractRolesFromConfig(user.roles_config);
 
       // Verify password
       const isValidPassword = await crypto.comparePassword(password, user.password_hash);
@@ -203,7 +251,8 @@ class UserAuthController {
           id: application_id,
           name: user.application_name,
           auth_mode: user.auth_mode,
-          available_roles: user.available_roles
+          available_roles: available_roles,
+          default_user_role: default_user_role
         }
       });
 
@@ -247,10 +296,15 @@ class UserAuthController {
     const { requested_role } = req.body;
     
     try {
-      // Verify user exists and belongs to this application
+      // Verify user exists and belongs to this application - FIXED QUERY
       const userQuery = `
-        SELECT u.*, ca.auth_mode, ca.available_roles, ca.default_user_role,
-               c.email as client_email, c.name as client_name
+        SELECT 
+          u.*, 
+          ca.auth_mode, 
+          ca.roles_config,
+          ca.default_role,
+          c.email as client_email, 
+          c.name as client_name
         FROM users u
         JOIN client_applications ca ON u.application_id = ca.id
         JOIN clients c ON u.client_id = c.id
@@ -272,6 +326,9 @@ class UserAuthController {
 
       const user = userResult.rows[0];
 
+      // Extract available roles from roles_config
+      const { available_roles } = this.extractRolesFromConfig(user.roles_config);
+
       // Check if application supports role management
       if (user.auth_mode !== 'advanced') {
         return res.status(400).json({
@@ -281,8 +338,7 @@ class UserAuthController {
       }
 
       // Check if requested role is valid
-      const availableRoles = user.available_roles || [];
-      if (!availableRoles.includes(requested_role)) {
+      if (!available_roles.includes(requested_role)) {
         return res.status(400).json({
           error: 'Invalid role requested',
           code: 'INVALID_ROLE',
@@ -297,10 +353,10 @@ class UserAuthController {
         });
       }
 
-      // Create role request
+      // Create role request - FIXED column name to match schema
       const requestQuery = `
         INSERT INTO user_role_requests (
-          user_id, client_id, application_id, current_role, requested_role,
+          user_id, client_id, application_id, current_user_role, requested_role,
           status, expires_at
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -313,7 +369,7 @@ class UserAuthController {
         user_id,
         req.user.client_id,
         req.user.application_id,
-        user.role,
+        user.role, // current_user_role
         requested_role,
         'pending',
         expiresAt
@@ -407,12 +463,14 @@ class UserAuthController {
         });
       }
 
+      // FIXED QUERY - removed ca.available_roles
       const query = `
         SELECT 
           u.id, u.email, u.name, u.role, u.email_verified, u.last_login,
           u.created_at, u.updated_at,
           ca.name as application_name, c.name as client_name,
-          ca.auth_mode, ca.available_roles
+          ca.auth_mode,
+          ca.roles_config
         FROM users u
         JOIN client_applications ca ON u.application_id = ca.id
         JOIN clients c ON u.client_id = c.id
@@ -433,6 +491,9 @@ class UserAuthController {
       }
 
       const user = result.rows[0];
+      
+      // Extract roles for the response
+      const { available_roles } = this.extractRolesFromConfig(user.roles_config);
 
       res.json({
         user: {
@@ -446,7 +507,7 @@ class UserAuthController {
           application: {
             name: user.application_name,
             auth_mode: user.auth_mode,
-            available_roles: user.available_roles
+            available_roles: available_roles
           },
           client: {
             name: user.client_name
@@ -559,7 +620,7 @@ class UserAuthController {
     try {
       const query = `
         SELECT 
-          id, current_role, requested_role, status, admin_notes,
+          id, current_user_role, requested_role, status, admin_notes,
           created_at, reviewed_at, expires_at
         FROM user_role_requests 
         WHERE user_id = $1 AND client_id = $2 AND application_id = $3
