@@ -180,23 +180,29 @@ const SimpleClientLogin = () => {
           </div>
         </form>
         
-        <div className="mt-8 p-4 bg-green-50 border border-green-200 rounded-md">
-          <p className="text-sm text-green-800">
-            <strong>✅ Login Ready:</strong> Client authentication is now fully functional! Try logging in above.
+        <div className="mt-8 p-6 bg-white border border-gray-200 rounded-xl shadow-sm">
+        <div className="text-center">
+          <div className="w-12 h-12 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full flex items-center justify-center mx-auto mb-4">
+            <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+            </svg>
+          </div>
+          <h3 className="text-xl font-bold text-gray-900 mb-2">Secure Access Portal</h3>
+          <p className="text-gray-600 mb-4">
+            Welcome back! Sign in to access your organization's applications and manage user authentication.
           </p>
-          <p className="text-xs text-green-600 mt-2">
-            Don't have an account? Register your organization to get started with AuthJet services.
-          </p>
-          <div className="mt-3 flex space-x-4">
-            <a 
-              href="/setup" 
-              className="text-sm font-medium text-green-600 hover:text-green-500"
-            >
-              View System Status →
-            </a>
-            <span className="text-xs text-green-500">API: http://localhost:8000</span>
+          <div className="flex justify-center space-x-6 text-sm text-gray-500">
+            <span className="flex items-center">
+              <div className="w-2 h-2 bg-green-400 rounded-full mr-2"></div>
+              API Connected
+            </span>
+            <span className="flex items-center">
+              <div className="w-2 h-2 bg-green-400 rounded-full mr-2"></div>
+              Encryption Active
+            </span>
           </div>
         </div>
+      </div>
       </div>
     </div>
   );

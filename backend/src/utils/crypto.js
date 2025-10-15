@@ -28,6 +28,11 @@ class CryptoUtils {
     }
   }
 
+  // ADD THIS ALIAS FOR COMPATIBILITY
+  async comparePassword(password, hash) {
+    return this.verifyPassword(password, hash);
+  }
+
   async verifyHash(data, hash) {
     try {
       const isValid = await bcrypt.compare(data, hash);
@@ -118,16 +123,14 @@ class CryptoUtils {
     }
     return code;
   }
-  // Add missing createHash method for compatibility
+
   createHash(algorithm) {
     return crypto.createHash(algorithm);
   }
 
-  // Add missing randomBytes method for compatibility
   randomBytes(size) {
     return crypto.randomBytes(size);
   }
-
 }
 
 module.exports = new CryptoUtils();

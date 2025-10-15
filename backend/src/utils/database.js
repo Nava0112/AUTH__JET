@@ -11,10 +11,10 @@ class Database {
   loadConfig() {
     // Supabase configuration
     return {
-      host: process.env.DB_HOST || 'aws-1-ap-south-1.pooler.supabase.com',
-      port: parseInt(process.env.DB_PORT) || 6543,
-      database: process.env.DB_NAME || 'postgres',
-      user: process.env.DB_USER || 'postgres.pxhyjlsbumqrrdqxdsyw',
+      host: process.env.DB_HOST ,
+      port: parseInt(process.env.DB_PORT),
+      database: process.env.DB_NAME,
+      user: process.env.DB_USER,
       password: process.env.DB_PASSWORD,
       ssl: { rejectUnauthorized: false },
       max: parseInt(process.env.DB_POOL_MAX) || 10,

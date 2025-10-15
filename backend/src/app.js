@@ -20,7 +20,8 @@ const webhookRoutes = require('./routes/webhook.routes');
 // New multi-tenant routes
 const adminRoutes = require('./routes/admin.routes');
 const clientAuthRoutes = require('./routes/clientAuth.routes');
-const userAuthRoutes = require('./routes/userAuth.routes');
+const userAuthRoutes = require('./routes/userAuth.routes'); // Fixed: removed duplicate
+const jwksRoutes = require('./routes/jwks.routes');
 
 class AuthJetApp {
   constructor() {
@@ -90,6 +91,7 @@ class AuthJetApp {
       message: 'Too many authentication attempts, please try again later.',
     });
 
+    // FIXED: Use this.app instead of app
     this.app.use(globalLimiter);
     this.app.use('/api/auth', authLimiter);
 
@@ -155,7 +157,10 @@ class AuthJetApp {
     // New multi-tenant routes
     this.app.use('/api/admin', adminRoutes);
     this.app.use('/api/client', clientAuthRoutes);
+    
+    // FIXED: User authentication routes - only include once
     this.app.use('/api/user', userAuthRoutes);
+    this.app.use('/api/user', jwksRoutes);
 
     // JWKS endpoint
     this.app.get('/.well-known/jwks.json', (req, res) => {
