@@ -1,7 +1,8 @@
 const crypto = require('../utils/crypto');
 const database = require('../utils/database');
 const logger = require('../utils/logger');
-const userJwtService = require('../services/userJwt.service');
+// IMPORTANT: Use client-specific JWT service for multi-tenant architecture
+const userJwtService = require('../services/userJwtClient.service');
 const emailService = require('../services/email.service');
 
 class UserAuthController {

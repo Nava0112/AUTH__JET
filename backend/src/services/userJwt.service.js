@@ -1,7 +1,5 @@
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
 const database = require('../utils/database');
 const logger = require('../utils/logger');
 
@@ -13,54 +11,151 @@ class UserJWTService {
     this.issuer = 'authjet-saas';
     this.audience = 'client-app-users';
     
-    this.privateKey = this.loadOrGeneratePrivateKey();
-    this.publicKey = this.loadOrGeneratePublicKey();
+    this.privateKey = this.loadPrivateKeyFromEnv();
+    this.publicKey = this.loadPublicKeyFromEnv();
+    
+    // Remove validation in constructor to prevent startup crashes
+    this.validateKeysAsync().catch(error => {
+      logger.warn('Initial key validation failed, but continuing:', error.message);
+    });
   }
 
-  loadOrGeneratePrivateKey() {
-    const keyPath = path.join(__dirname, '../../keys/private.key');
-    
+  loadPrivateKeyFromEnv() {
     try {
-      if (fs.existsSync(keyPath)) {
-        return fs.readFileSync(keyPath, 'utf8');
+      let privateKey = process.env.JWT_PRIVATE_KEY;
+      
+      if (!privateKey) {
+        // Fallback to file-based keys if env vars not set
+        logger.warn('JWT_PRIVATE_KEY not found in environment, checking for key files...');
+        return this.loadPrivateKeyFromFile();
+      }
+
+      // Handle different key formats
+      privateKey = privateKey.trim();
+      
+      // If it contains BEGIN PRIVATE KEY, it's likely PEM format
+      if (privateKey.includes('BEGIN PRIVATE KEY')) {
+        return privateKey.replace(/\\n/g, '\n');
       }
       
-      // Generate new RSA key pair
-      const { generateKeyPairSync } = require('crypto');
-      const { privateKey, publicKey } = generateKeyPairSync('rsa', {
-        modulusLength: 2048,
-        publicKeyEncoding: {
-          type: 'spki',
-          format: 'pem'
-        },
-        privateKeyEncoding: {
-          type: 'pkcs8',
-          format: 'pem'
+      // If it's base64 encoded without PEM headers, try to decode
+      try {
+        const decoded = Buffer.from(privateKey, 'base64').toString('utf8');
+        if (decoded.includes('BEGIN')) {
+          return decoded.replace(/\\n/g, '\n');
         }
-      });
-      
-      // Ensure directory exists
-      const keysDir = path.dirname(keyPath);
-      if (!fs.existsSync(keysDir)) {
-        fs.mkdirSync(keysDir, { recursive: true });
+      } catch (e) {
+        // Not base64, use as-is
       }
       
-      // Save keys
-      fs.writeFileSync(keyPath, privateKey);
-      fs.writeFileSync(path.join(__dirname, '../../keys/public.key'), publicKey);
-      
-      logger.info('Generated new RSA key pair for JWT');
-      return privateKey;
+      // If we get here, assume it's PEM format but might need formatting
+      return this.formatPemKey(privateKey, 'PRIVATE KEY');
       
     } catch (error) {
-      logger.error('Failed to load/generate JWT keys:', error);
-      throw error;
+      logger.error('Failed to load private key:', error);
+      throw new Error('JWT private key configuration error');
     }
   }
 
-  loadOrGeneratePublicKey() {
+  loadPublicKeyFromEnv() {
+    try {
+      let publicKey = process.env.JWT_PUBLIC_KEY;
+      
+      if (!publicKey) {
+        // Fallback to file-based keys if env vars not set
+        logger.warn('JWT_PUBLIC_KEY not found in environment, checking for key files...');
+        return this.loadPublicKeyFromFile();
+      }
+
+      // Handle different key formats
+      publicKey = publicKey.trim();
+      
+      // If it contains BEGIN PUBLIC KEY, it's likely PEM format
+      if (publicKey.includes('BEGIN PUBLIC KEY')) {
+        return publicKey.replace(/\\n/g, '\n');
+      }
+      
+      // If it's base64 encoded without PEM headers, try to decode
+      try {
+        const decoded = Buffer.from(publicKey, 'base64').toString('utf8');
+        if (decoded.includes('BEGIN')) {
+          return decoded.replace(/\\n/g, '\n');
+        }
+      } catch (e) {
+        // Not base64, use as-is
+      }
+      
+      // If we get here, assume it's PEM format but might need formatting
+      return this.formatPemKey(publicKey, 'PUBLIC KEY');
+      
+    } catch (error) {
+      logger.error('Failed to load public key:', error);
+      throw new Error('JWT public key configuration error');
+    }
+  }
+
+  // Fallback to file-based keys for backward compatibility
+  loadPrivateKeyFromFile() {
+    const fs = require('fs');
+    const path = require('path');
+    const keyPath = path.join(__dirname, '../../keys/private.key');
+    
+    if (fs.existsSync(keyPath)) {
+      logger.info('Loading private key from file');
+      return fs.readFileSync(keyPath, 'utf8');
+    }
+    
+    throw new Error('No JWT private key found in environment or files');
+  }
+
+  loadPublicKeyFromFile() {
+    const fs = require('fs');
+    const path = require('path');
     const keyPath = path.join(__dirname, '../../keys/public.key');
-    return fs.readFileSync(keyPath, 'utf8');
+    
+    if (fs.existsSync(keyPath)) {
+      logger.info('Loading public key from file');
+      return fs.readFileSync(keyPath, 'utf8');
+    }
+    
+    throw new Error('No JWT public key found in environment or files');
+  }
+
+  formatPemKey(key, keyType) {
+    // Ensure proper PEM formatting
+    let formattedKey = key.trim();
+    
+    // Add PEM headers if missing
+    if (!formattedKey.includes('BEGIN')) {
+      formattedKey = `-----BEGIN ${keyType}-----\n${formattedKey}\n-----END ${keyType}-----`;
+    }
+    
+    // Ensure proper newlines
+    formattedKey = formattedKey.replace(/\\n/g, '\n');
+    formattedKey = formattedKey.replace(/ /g, '\n');
+    
+    return formattedKey;
+  }
+
+  async validateKeysAsync() {
+    try {
+      // Simple test to verify keys work
+      const testPayload = { test: true, iat: Math.floor(Date.now() / 1000) };
+      const token = jwt.sign(testPayload, this.privateKey, { 
+        algorithm: this.algorithm,
+        expiresIn: '1m'
+      });
+      
+      const decoded = jwt.verify(token, this.publicKey, { algorithms: [this.algorithm] });
+      
+      if (decoded.test) {
+        logger.info('JWT keys validated successfully');
+        return true;
+      }
+    } catch (error) {
+      logger.warn('JWT key validation failed (this might be OK if keys are being rotated):', error.message);
+      return false;
+    }
   }
 
   async generateAccessToken(user, clientId, applicationId) {

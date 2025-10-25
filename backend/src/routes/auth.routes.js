@@ -339,7 +339,7 @@ router.post('/reset-password', authRateLimit, async (req, res, next) => {
   try {
     const { token, password, client_id } = req.body;
 
-    const tokenHash = require('../utils/crypto').hashToken(token);
+    const { hashToken } = require('../utils/token.utils');
 
     // Verify reset token
     const resetQuery = `

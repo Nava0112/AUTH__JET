@@ -1,47 +1,104 @@
 const express = require('express');
-const userJwtService = require('../services/userJwt.service');
-const jose = require('jose');
+const ClientKeyService = require('../services/clientKey.service');
+const logger = require('../utils/logger');
+const database = require('../utils/database');
 
 const router = express.Router();
 
-// JWKS endpoint for public key distribution
-router.get('/jwks', async (req, res) => {
+// PUBLIC CLIENT-SPECIFIC JWKS ENDPOINT (NO AUTH REQUIRED)
+// This is what external client applications use to verify user JWTs
+router.get('/clients/:clientId/jwks.json', async (req, res) => {
   try {
-    const publicKey = await jose.importSPKI(userJwtService.publicKey, 'RS256');
-    const jwk = await jose.exportJWK(publicKey);
+    const { clientId } = req.params;
     
-    const jwks = {
-      keys: [{
-        ...jwk,
-        use: 'sig',
-        alg: 'RS256',
-        kid: 'authjet-1',
-      }]
-    };
-
-    res.setHeader('Content-Type', 'application/json');
-    res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
+    // Verify client exists and is active
+    const clientQuery = 'SELECT id FROM clients WHERE id = $1 AND is_active = true';
+    const clientResult = await database.query(clientQuery, [clientId]);
     
-    res.json(jwks);
+    if (clientResult.rows.length === 0) {
+      return res.status(404).json({
+        error: 'Client not found or inactive',
+        code: 'CLIENT_NOT_FOUND'
+      });
+    }
+    
+    // Get public JWK for this client
+    const jwk = await ClientKeyService.getPublicJwk(clientId);
+    
+    // Set cache headers for better performance
+    res.set('Cache-Control', 'public, max-age=3600');
+    res.set('Access-Control-Allow-Origin', '*'); // Allow CORS for public endpoint
+    res.json({ keys: [jwk] });
+    
   } catch (error) {
-    console.error('JWKS endpoint error:', error);
-    res.status(500).json({
-      error: 'Failed to generate JWKS',
-      code: 'JWKS_ERROR'
+    logger.error('Client JWKS endpoint error:', error);
+    
+    if (error.message.includes('No key found')) {
+      return res.status(404).json({ 
+        error: 'No active key found for this client. Client must generate keys first.',
+        code: 'NO_KEYS_FOUND'
+      });
+    }
+    
+    res.status(500).json({ 
+      error: 'Failed to retrieve JWKS for client',
+      code: 'CLIENT_JWKS_ERROR'
     });
   }
 });
 
-// Public key endpoint (simple format)
-router.get('/public-key', (req, res) => {
+// PUBLIC APPLICATION-SPECIFIC JWKS ENDPOINT (NO AUTH REQUIRED)
+// Alternative endpoint using application_id
+router.get('/applications/:applicationId/jwks.json', async (req, res) => {
   try {
-    res.setHeader('Content-Type', 'application/x-pem-file');
-    res.send(userJwtService.publicKey);
+    const { applicationId } = req.params;
+    
+    // Get client_id from application
+    const appQuery = `
+      SELECT ca.client_id, c.is_active as client_active, ca.is_active as app_active
+      FROM client_applications ca
+      JOIN clients c ON ca.client_id = c.id
+      WHERE ca.id = $1
+    `;
+    const appResult = await database.query(appQuery, [applicationId]);
+    
+    if (appResult.rows.length === 0) {
+      return res.status(404).json({
+        error: 'Application not found',
+        code: 'APPLICATION_NOT_FOUND'
+      });
+    }
+    
+    const app = appResult.rows[0];
+    
+    if (!app.client_active || !app.app_active) {
+      return res.status(404).json({
+        error: 'Application or client is inactive',
+        code: 'APPLICATION_INACTIVE'
+      });
+    }
+    
+    // Get public JWK for this client
+    const jwk = await ClientKeyService.getPublicJwk(app.client_id);
+    
+    // Set cache headers for better performance
+    res.set('Cache-Control', 'public, max-age=3600');
+    res.set('Access-Control-Allow-Origin', '*'); // Allow CORS for public endpoint
+    res.json({ keys: [jwk] });
+    
   } catch (error) {
-    console.error('Public key endpoint error:', error);
-    res.status(500).json({
-      error: 'Failed to retrieve public key',
-      code: 'PUBLIC_KEY_ERROR'
+    logger.error('Application JWKS endpoint error:', error);
+    
+    if (error.message.includes('No key found')) {
+      return res.status(404).json({ 
+        error: 'No active key found for this application. Client must generate keys first.',
+        code: 'NO_KEYS_FOUND'
+      });
+    }
+    
+    res.status(500).json({ 
+      error: 'Failed to retrieve JWKS for application',
+      code: 'APPLICATION_JWKS_ERROR'
     });
   }
 });

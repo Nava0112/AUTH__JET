@@ -136,6 +136,9 @@ class AuthJetApp {
       });
     });
 
+    // PUBLIC JWKS ENDPOINTS (NO AUTH REQUIRED) - Must be registered BEFORE authenticated routes
+    this.app.use('/api/public', require('./routes/jwks.routes'));
+
     // OAuth 2.0 routes
     this.app.use('/oauth', require('./routes/oauth.routes'));
     this.app.use('/auth', require('./routes/oauth.routes'));
@@ -161,16 +164,30 @@ class AuthJetApp {
     // FIXED: User authentication routes - only include once
     this.app.use('/api/user', userAuthRoutes);
     this.app.use('/api/user', jwksRoutes);
+    this.app.use('/api/client', require('./routes/clientKeys.routes'));
 
     // JWKS endpoint
     this.app.get('/.well-known/jwks.json', (req, res) => {
-      try {
-        const jwk = require('./services/jwt.service').getPublicJwk();
-        res.json({ keys: [jwk] });
-      } catch (error) {
-        res.status(500).json({ error: 'Failed to retrieve JWKS' });
+    try {
+      const jwtService = require('./services/jwt.service');
+      const jwk = jwtService.getPublicJwk();
+      
+      if (!jwk) {
+        return res.status(501).json({ 
+          error: 'JWKS not supported with current configuration',
+          code: 'JWKS_NOT_SUPPORTED'
+        });
       }
-    });
+      
+      res.json({ keys: [jwk] });
+    } catch (error) {
+      logger.error('JWKS endpoint error:', error);
+      res.status(500).json({ 
+        error: 'Failed to retrieve JWKS',
+        code: 'JWKS_ERROR'
+      });
+    }
+  });
   }
 
   setupErrorHandling() {
