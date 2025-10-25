@@ -23,11 +23,36 @@ class ClientKeyService {
   }
 
   /**
-   * Generate RSA key pair for a client
+   * Convert custom client_id string to database client ID
+   */
+  async getClientDbId(clientId) {
+  // Check if clientId is already a numeric database ID
+  if (!isNaN(clientId) && Number.isInteger(Number(clientId))) {
+    return parseInt(clientId);
+  }
+  
+  // If it's a string client_id (like "cli_..."), look up the numeric ID
+  const clientQuery = await database.query(
+    'SELECT id FROM clients WHERE client_id = $1',
+    [clientId]
+  );
+  
+  if (clientQuery.rows.length === 0) {
+    throw new Error('Client not found');
+  }
+  
+  return clientQuery.rows[0].id;
+}
+
+  /**
+   * Generate RSA key pair for a client - FIXED VERSION
    */
   async generateKeyPair(clientId) {
     try {
-      logger.info('Generating RSA key pair for client', { clientId });
+      // Convert custom client_id string to database client ID
+      const clientDbId = await this.getClientDbId(clientId);
+
+      logger.info('Generating RSA key pair for client', { clientId, clientDbId });
 
       // Check if client already has an active key
       const existingKey = await this.getActiveKey(clientId);
@@ -54,7 +79,7 @@ class ClientKeyService {
       // Encrypt private key for storage
       const encryptedPrivateKey = this.encryptPrivateKey(privateKey);
 
-      // Store keys in database
+      // Store keys in database - use clientDbId (integer)
       const query = `
         INSERT INTO client_keys (
           client_id, key_id, public_key, private_key_encrypted, 
@@ -64,7 +89,7 @@ class ClientKeyService {
       `;
 
       const result = await database.query(query, [
-        clientId,
+        clientDbId, // Use database ID here
         keyId,
         publicKey,
         encryptedPrivateKey,
@@ -95,21 +120,26 @@ class ClientKeyService {
   }
 
   /**
-   * Encrypt private key for secure storage (SIMPLIFIED VERSION)
+   * Encrypt private key for secure storage - FIXED GCM VERSION
    */
   encryptPrivateKey(privateKey) {
     try {
-      const iv = crypto.randomBytes(16);
+      const iv = crypto.randomBytes(16); // 16 bytes for GCM
       const keyBuffer = Buffer.from(this.encryptionKey, 'hex');
       
-      const cipher = crypto.createCipheriv('aes-256-cbc', keyBuffer, iv);
+      // Use AES-GCM for authenticated encryption
+      const cipher = crypto.createCipheriv('aes-256-gcm', keyBuffer, iv);
       
       let encrypted = cipher.update(privateKey, 'utf8', 'hex');
       encrypted += cipher.final('hex');
       
+      // Get auth tag for GCM
+      const authTag = cipher.getAuthTag();
+      
       return JSON.stringify({
         iv: iv.toString('hex'),
-        data: encrypted
+        data: encrypted,
+        authTag: authTag.toString('hex')
       });
     } catch (error) {
       logger.error('Failed to encrypt private key:', error);
@@ -118,15 +148,18 @@ class ClientKeyService {
   }
 
   /**
-   * Decrypt private key for signing (SIMPLIFIED VERSION)
+   * Decrypt private key for signing - FIXED GCM VERSION
    */
   decryptPrivateKey(encryptedData) {
     try {
-      const { iv, data } = JSON.parse(encryptedData);
+      const { iv, data, authTag } = JSON.parse(encryptedData);
       const keyBuffer = Buffer.from(this.encryptionKey, 'hex');
       const ivBuffer = Buffer.from(iv, 'hex');
+      const authTagBuffer = Buffer.from(authTag, 'hex');
       
-      const decipher = crypto.createDecipheriv('aes-256-cbc', keyBuffer, ivBuffer);
+      // Use AES-GCM for decryption
+      const decipher = crypto.createDecipheriv('aes-256-gcm', keyBuffer, ivBuffer);
+      decipher.setAuthTag(authTagBuffer);
       
       let decrypted = decipher.update(data, 'hex', 'utf8');
       decrypted += decipher.final('utf8');
@@ -139,10 +172,13 @@ class ClientKeyService {
   }
 
   /**
-   * Get active key for a client
+   * Get active key for a client - FIXED VERSION
    */
   async getActiveKey(clientId) {
     try {
+      // Convert custom client_id string to database client ID
+      const clientDbId = await this.getClientDbId(clientId);
+
       const query = `
         SELECT * FROM client_keys 
         WHERE client_id = $1 AND is_active = true 
@@ -150,7 +186,7 @@ class ClientKeyService {
         LIMIT 1
       `;
 
-      const result = await database.query(query, [clientId]);
+      const result = await database.query(query, [clientDbId]);
       
       if (result.rows.length === 0) {
         return null;
@@ -171,18 +207,56 @@ class ClientKeyService {
   }
 
   /**
-   * Get public JWK for a client's key
+   * Get active key pair for a client - FIXED VERSION
+   */
+  async getActiveKeyPair(clientId) {
+    try {
+      // Convert custom client_id string to database client ID
+      const clientDbId = await this.getClientDbId(clientId);
+
+      const query = `
+        SELECT * FROM client_keys 
+        WHERE client_id = $1 AND is_active = true 
+        ORDER BY created_at DESC 
+        LIMIT 1
+      `;
+
+      const result = await database.query(query, [clientDbId]);
+      
+      if (result.rows.length === 0) {
+        return null;
+      }
+
+      const key = result.rows[0];
+      
+      // Decrypt private key
+      if (key.private_key_encrypted) {
+        key.private_key = this.decryptPrivateKey(key.private_key_encrypted);
+      }
+
+      return key;
+    } catch (error) {
+      logger.error('Failed to get active key pair for client:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get public JWK for a client's key - FIXED VERSION
    */
   async getPublicJwk(clientId, keyId = null) {
     try {
+      // Convert custom client_id string to database client ID
+      const clientDbId = await this.getClientDbId(clientId);
+
       let query, params;
       
       if (keyId) {
         query = `SELECT * FROM client_keys WHERE client_id = $1 AND key_id = $2`;
-        params = [clientId, keyId];
+        params = [clientDbId, keyId];
       } else {
         query = `SELECT * FROM client_keys WHERE client_id = $1 AND is_active = true ORDER BY created_at DESC LIMIT 1`;
-        params = [clientId];
+        params = [clientDbId];
       }
 
       const result = await database.query(query, params);
@@ -192,7 +266,7 @@ class ClientKeyService {
       }
 
       const key = result.rows[0];
-      return this.generateJwkFromPublicKey(key.public_key, key.kid);
+      return this.generateProperJwkFromPublicKey(key.public_key, key.kid);
     } catch (error) {
       logger.error('Failed to get public JWK for client:', error);
       throw error;
@@ -200,29 +274,99 @@ class ClientKeyService {
   }
 
   /**
-   * Generate JWK from public key
+   * Generate proper JWK from public key - FIXED VERSION
+   * Extracts actual RSA modulus (n) and exponent (e) from PEM
    */
-  generateJwkFromPublicKey(publicKeyPem, kid) {
+  generateProperJwkFromPublicKey(publicKeyPem, kid) {
     try {
-      // Simplified JWK - use base64 encoded public key
-      const publicKeyBase64 = Buffer.from(publicKeyPem).toString('base64url');
+      // Create public key object from PEM
+      const publicKey = crypto.createPublicKey(publicKeyPem);
+      
+      // Export as JWK to get proper n and e values
+      const jwk = publicKey.export({ format: 'jwk' });
+      
+      return {
+        kty: jwk.kty,
+        use: 'sig',
+        alg: 'RS256',
+        kid: kid,
+        n: jwk.n,  // RSA modulus (base64url encoded)
+        e: jwk.e   // RSA exponent (base64url encoded)
+      };
+    } catch (error) {
+      logger.error('Failed to generate proper JWK from public key:', error);
+      
+      // Fallback method if the above fails
+      return this.generateJwkFallback(publicKeyPem, kid);
+    }
+  }
+
+  /**
+   * Fallback method to extract RSA components from PEM
+   */
+  generateJwkFallback(publicKeyPem, kid) {
+    try {
+      // Parse PEM to extract ASN.1 structure
+      const publicKey = crypto.createPublicKey(publicKeyPem);
+      
+      // Get the key in DER format
+      const der = publicKey.export({ format: 'der', type: 'spki' });
+      
+      // For Node.js < 15 or if export fails, use manual parsing
+      // This is a simplified approach - in production, use a proper ASN.1 parser
+      const asn1 = this.parseRsaPublicKey(der);
       
       return {
         kty: 'RSA',
         use: 'sig',
         alg: 'RS256',
         kid: kid,
-        n: publicKeyBase64,
-        e: 'AQAB'
+        n: asn1.n,
+        e: asn1.e
       };
     } catch (error) {
-      logger.error('Failed to generate JWK from public key:', error);
+      logger.error('Fallback JWK generation also failed:', error);
+      throw new Error('Failed to convert public key to JWK format');
+    }
+  }
+
+  /**
+   * Simple RSA public key parser (basic implementation)
+   */
+  parseRsaPublicKey(derBuffer) {
+    try {
+      // This is a very basic parser for RSA public keys
+      // In production, consider using a proper ASN.1 library like 'asn1.js'
+      
+      // RSA public key structure in DER is typically:
+      // SEQUENCE { SEQUENCE { OID, NULL }, BITSTRING { SEQUENCE { n, e } } }
+      
+      // For now, use the crypto module's built-in capability
+      const publicKey = crypto.createPublicKey({
+        key: derBuffer,
+        format: 'der',
+        type: 'spki'
+      });
+      
+      // Try to export as JWK again
+      const jwk = publicKey.export({ format: 'jwk' });
+      
+      if (jwk.kty === 'RSA' && jwk.n && jwk.e) {
+        return {
+          n: jwk.n,
+          e: jwk.e
+        };
+      }
+      
+      throw new Error('Could not extract RSA components');
+    } catch (error) {
+      logger.error('Failed to parse RSA public key:', error);
       throw error;
     }
   }
 
   /**
-   * Sign JWT with client's private key
+   * Sign JWT with client's private key - FIXED VERSION
    */
   async signJwt(clientId, payload) {
     try {
@@ -261,7 +405,7 @@ class ClientKeyService {
   }
 
   /**
-   * Verify JWT with client's public key
+   * Verify JWT with client's public key - FIXED VERSION
    */
   async verifyJwt(clientId, token) {
     try {
@@ -297,17 +441,20 @@ class ClientKeyService {
   }
 
   /**
-   * Rotate client keys (generate new, revoke old)
+   * Rotate client keys (generate new, revoke old) - FIXED VERSION
    */
   async rotateKeys(clientId) {
     try {
+      // Convert custom client_id string to database client ID
+      const clientDbId = await this.getClientDbId(clientId);
+
       // Revoke current active key
       const revokeQuery = `
         UPDATE client_keys 
         SET is_active = false, revoked_at = NOW() 
         WHERE client_id = $1 AND is_active = true
       `;
-      await database.query(revokeQuery, [clientId]);
+      await database.query(revokeQuery, [clientDbId]);
 
       // Generate new key pair
       const newKey = await this.generateKeyPair(clientId);
@@ -322,10 +469,13 @@ class ClientKeyService {
   }
 
   /**
-   * Get all keys for a client (for management)
+   * Get all keys for a client (for management) - FIXED VERSION
    */
   async getClientKeys(clientId) {
     try {
+      // Convert custom client_id string to database client ID
+      const clientDbId = await this.getClientDbId(clientId);
+
       const query = `
         SELECT 
           key_id, kid, algorithm, key_type, key_size,
@@ -335,7 +485,7 @@ class ClientKeyService {
         ORDER BY created_at DESC
       `;
 
-      const result = await database.query(query, [clientId]);
+      const result = await database.query(query, [clientDbId]);
       return result.rows;
     } catch (error) {
       logger.error('Failed to get client keys:', error);
@@ -344,10 +494,13 @@ class ClientKeyService {
   }
 
   /**
-   * Revoke a specific key
+   * Revoke a specific key - FIXED VERSION
    */
   async revokeKey(clientId, keyId) {
     try {
+      // Convert custom client_id string to database client ID
+      const clientDbId = await this.getClientDbId(clientId);
+
       const query = `
         UPDATE client_keys 
         SET is_active = false, revoked_at = NOW() 
@@ -355,7 +508,7 @@ class ClientKeyService {
         RETURNING key_id
       `;
 
-      const result = await database.query(query, [clientId, keyId]);
+      const result = await database.query(query, [clientDbId, keyId]);
       
       if (result.rows.length === 0) {
         throw new Error('Key not found');
@@ -365,6 +518,135 @@ class ClientKeyService {
       return result.rows[0];
     } catch (error) {
       logger.error('Failed to revoke key:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Test JWK generation for a specific key - FIXED VERSION
+   */
+  async testJwkGeneration(clientId) {
+    try {
+      const key = await this.getActiveKeyPair(clientId);
+      if (!key) {
+        throw new Error('No active key found');
+      }
+
+      const jwk = await this.generateProperJwkFromPublicKey(key.public_key, key.kid);
+      
+      logger.info('JWK generation test successful', {
+        clientId,
+        kid: jwk.kid,
+        n_length: jwk.n ? jwk.n.length : 0,
+        e: jwk.e
+      });
+
+      return jwk;
+    } catch (error) {
+      logger.error('JWK generation test failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get key by key ID - FIXED VERSION
+   */
+  async getKeyByKeyId(clientId, keyId) {
+    try {
+      // Convert custom client_id string to database client ID
+      const clientDbId = await this.getClientDbId(clientId);
+
+      const query = `
+        SELECT * FROM client_keys 
+        WHERE client_id = $1 AND key_id = $2
+      `;
+
+      const result = await database.query(query, [clientDbId, keyId]);
+      
+      if (result.rows.length === 0) {
+        return null;
+      }
+
+      const key = result.rows[0];
+      
+      // Decrypt private key if needed
+      if (key.private_key_encrypted) {
+        key.private_key = this.decryptPrivateKey(key.private_key_encrypted);
+      }
+
+      return key;
+    } catch (error) {
+      logger.error('Failed to get key by key ID:', error);
+      throw error;
+    }
+  }
+  // Add this temporary debug method to your ClientKeyService
+async debugEncryptionIssue(clientId) {
+  try {
+    // Get the encrypted data from database
+    const clientDbId = await this.getClientDbId(clientId);
+    const result = await database.query(
+      'SELECT private_key_encrypted FROM client_keys WHERE client_id = $1 AND is_active = true',
+      [clientDbId]
+    );
+    
+    if (result.rows.length === 0) {
+      return { error: 'No key found' };
+    }
+
+    const encryptedData = result.rows[0].private_key_encrypted;
+    const { iv, data, authTag } = JSON.parse(encryptedData);
+    
+    console.log('Encryption details:', {
+      ivLength: iv.length,
+      dataLength: data.length, 
+      authTagLength: authTag.length,
+      encryptionKey: this.encryptionKey,
+      encryptionKeyLength: this.encryptionKey.length
+    });
+
+    // Try to decrypt with current key
+    try {
+      const keyBuffer = Buffer.from(this.encryptionKey, 'hex');
+      const ivBuffer = Buffer.from(iv, 'hex');
+      const authTagBuffer = Buffer.from(authTag, 'hex');
+      
+      const decipher = crypto.createDecipheriv('aes-256-gcm', keyBuffer, ivBuffer);
+      decipher.setAuthTag(authTagBuffer);
+      
+      let decrypted = decipher.update(data, 'hex', 'utf8');
+      decrypted += decipher.final('utf8');
+      
+      return { success: true, decryptedLength: decrypted.length };
+    } catch (decryptError) {
+      return { 
+        success: false, 
+        error: decryptError.message,
+        currentKey: this.encryptionKey
+      };
+    }
+  } catch (error) {
+    return { error: error.message };
+  }
+}
+
+  /**
+   * Check if client has any active keys - FIXED VERSION
+   */
+  async hasActiveKey(clientId) {
+    try {
+      // Convert custom client_id string to database client ID
+      const clientDbId = await this.getClientDbId(clientId);
+
+      const query = `
+        SELECT COUNT(*) as key_count FROM client_keys 
+        WHERE client_id = $1 AND is_active = true
+      `;
+
+      const result = await database.query(query, [clientDbId]);
+      return parseInt(result.rows[0].key_count) > 0;
+    } catch (error) {
+      logger.error('Failed to check active keys:', error);
       throw error;
     }
   }

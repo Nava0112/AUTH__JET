@@ -118,12 +118,13 @@ const UserLogin = () => {
     try {
       const endpoint = isLogin ? '/api/user/login' : '/api/user/register';
       const response = await fetch(`http://localhost:8000${endpoint}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(data)
-      });
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include', // 🆕 ADD THIS for cookies
+      body: JSON.stringify(data)
+});
 
       const result = await response.json();
 

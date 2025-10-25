@@ -274,12 +274,12 @@ const authenticateApplication = async (req, res, next) => {
     }
 
     // Verify application exists and is active
-    const appQuery = `
-      SELECT ca.*, c.name as client_name, c.is_active as client_active
-      FROM client_applications ca
-      JOIN clients c ON ca.client_id = c.id
-      WHERE ca.client_id_key = $1 AND ca.is_active = true AND c.is_active = true
-    `;
+      const appQuery = `
+    SELECT ca.*, c.name as client_name, c.is_active as client_active
+    FROM client_applications ca
+    JOIN clients c ON ca.client_id = c.id
+    WHERE c.client_id = $1 AND ca.is_active = true AND c.is_active = true
+  `;
     
     const appResult = await database.query(appQuery, [clientId]);
     

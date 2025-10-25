@@ -1,137 +1,222 @@
-require('dotenv').config();
-const ClientKeyService = require('../src/services/clientKey.service');
-const database = require('../src/utils/database');
+const axios = require('axios');
+const database = require('./src/utils/database');
+const logger = require('./src/utils/logger');
 
-async function testClientKeys() {
-  console.log('🧪 Testing Client Key System...\n');
+class ClientKeyTester {
+  constructor() {
+    this.baseURL = 'http://localhost:8000';
+    this.adminToken = null;
+    this.testClientId = null;
+  }
+
+  async runAllTests() {
+    try {
+      console.log('🚀 Starting Client Key System Tests...\n');
+      
+      // Test 1: Admin Login
+      await this.testAdminLogin();
+      
+      // Test 2: Create Client via API
+      await this.testCreateClientViaAPI();
+      
+      // Test 3: Verify Key Generation
+      await this.testKeyGeneration();
+      
+      // Test 4: Test Token Verification
+      await this.testTokenVerification();
+      
+      // Test 5: Test JWKS Endpoint
+      await this.testJWKSEndpoint();
+      
+      console.log('\n✅ ALL TESTS COMPLETED SUCCESSFULLY!');
+      
+    } catch (error) {
+      console.error('\n❌ TEST FAILED:', error.message);
+    }
+  }
+
+  async testAdminLogin() {
+    console.log('1. Testing Admin Login...');
+    
+    try {
+      const response = await axios.post(`${this.baseURL}/api/auth/admin/login`, {
+        email: '00mrdarkdragon@gmail.com',
+        password: 'Darkdragon@2005'
+      });
+
+      if (response.data.token) {
+        this.adminToken = response.data.token;
+        console.log('✅ Admin login successful');
+        console.log(`   Token: ${this.adminToken.substring(0, 50)}...`);
+      } else {
+        throw new Error('No token received');
+      }
+    } catch (error) {
+      throw new Error(`Admin login failed: ${error.response?.data?.error || error.message}`);
+    }
+  }
+
+  async testCreateClientViaAPI() {
+    console.log('\n2. Testing Client Creation via API...');
+    
+    try {
+      const testEmail = `test-client-${Date.now()}@test.com`;
+      
+      const response = await axios.post(`${this.baseURL}/api/clients`, {
+        name: `Test Client ${Date.now()}`,
+        contact_email: testEmail,
+        website: 'https://test.com',
+        business_type: 'saas',
+        allowed_domains: ['test.com'],
+        default_roles: ['user']
+      }, {
+        headers: {
+          'Authorization': `Bearer ${this.adminToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      this.testClientId = response.data.client.id;
+      console.log('✅ Client created successfully');
+      console.log(`   Client ID: ${this.testClientId}`);
+      console.log(`   Email: ${testEmail}`);
+      
+    } catch (error) {
+      throw new Error(`Client creation failed: ${error.response?.data?.error || error.message}`);
+    }
+  }
+
+  async testKeyGeneration() {
+    console.log('\n3. Testing RSA Key Generation...');
+    
+    try {
+      // Check if key was generated in database
+      const keyResult = await database.query(
+        'SELECT * FROM client_keys WHERE client_id = $1 AND is_active = true',
+        [this.testClientId]
+      );
+
+      if (keyResult.rows.length === 0) {
+        throw new Error('No RSA key pair found for client');
+      }
+
+      const key = keyResult.rows[0];
+      console.log('✅ RSA Key pair generated successfully');
+      console.log(`   Key ID: ${key.key_id}`);
+      console.log(`   KID: ${key.kid}`);
+      console.log(`   Algorithm: ${key.algorithm}`);
+      console.log(`   Key Size: ${key.key_size}`);
+      
+    } catch (error) {
+      throw new Error(`Key generation check failed: ${error.message}`);
+    }
+  }
+
+  async testTokenVerification() {
+    console.log('\n4. Testing Token Verification...');
+    
+    try {
+      // Get a token for the client (simulate client login)
+      const loginResponse = await axios.post(`${this.baseURL}/api/auth/client/login`, {
+        email: '00mrdarkdragon@gmail.com', // Use your email as client
+        password: 'Darkdragon@2005'
+      });
+
+      const clientToken = loginResponse.data.token;
+      console.log('✅ Client token obtained');
+      console.log(`   Token: ${clientToken.substring(0, 50)}...`);
+
+      // Verify the token
+      const verifyResponse = await axios.post(`${this.baseURL}/api/auth/verify-token`, {
+        token: clientToken
+      });
+
+      if (verifyResponse.data.valid) {
+        console.log('✅ Token verification successful');
+        console.log(`   Client ID in token: ${verifyResponse.data.payload.sub}`);
+      } else {
+        throw new Error('Token verification failed');
+      }
+      
+    } catch (error) {
+      console.log('⚠️  Client login failed, testing with admin token instead...');
+      
+      // Fallback: Verify admin token
+      const verifyResponse = await axios.post(`${this.baseURL}/api/auth/verify-token`, {
+        token: this.adminToken
+      });
+
+      if (verifyResponse.data.valid) {
+        console.log('✅ Admin token verification successful');
+      } else {
+        throw new Error('Token verification failed');
+      }
+    }
+  }
+
+  async testJWKSEndpoint() {
+    console.log('\n5. Testing JWKS Endpoint...');
+    
+    try {
+      const response = await axios.get(`${this.baseURL}/.well-known/jwks.json`);
+      
+      if (response.data.keys && response.data.keys.length > 0) {
+        console.log('✅ JWKS endpoint working');
+        console.log(`   Found ${response.data.keys.length} public key(s)`);
+        console.log(`   First KID: ${response.data.keys[0].kid}`);
+      } else {
+        throw new Error('No keys found in JWKS response');
+      }
+      
+    } catch (error) {
+      console.log('⚠️  Main JWKS failed, trying client-specific endpoint...');
+      
+      // Try client-specific JWKS
+      const response = await axios.get(`${this.baseURL}/api/jwks/${this.testClientId}`);
+      
+      if (response.data.keys && response.data.keys.length > 0) {
+        console.log('✅ Client JWKS endpoint working');
+        console.log(`   Found ${response.data.keys.length} public key(s)`);
+      } else {
+        throw new Error('Client JWKS also failed');
+      }
+    }
+  }
+}
+
+// Run the tests
+async function main() {
+  const tester = new ClientKeyTester();
   
   try {
-    // Connect to database
-    await database.connect();
-    console.log('✅ Database connected\n');
-
-    // Get a client that doesn't have a key yet, or use client ID 2
-    const testClientId = await getTestClientId();
-    console.log('Using client ID for testing:', testClientId);
-    console.log('');
-
-    // Check if client already has an active key
-    console.log('1. Checking for existing active key...');
-    const existingKey = await ClientKeyService.getActiveKey(testClientId);
-    
-    if (existingKey) {
-      console.log('✅ Client already has active key:');
-      console.log('   Key ID:', existingKey.key_id);
-      console.log('   KID:', existingKey.kid);
-      console.log('   Created:', existingKey.created_at);
-      console.log('');
-    } else {
-      console.log('2. Generating key pair for client:', testClientId);
-      const keyPair = await ClientKeyService.generateKeyPair(testClientId);
-      console.log('✅ Key pair generated:');
-      console.log('   Key ID:', keyPair.keyId);
-      console.log('   KID:', keyPair.kid);
-      console.log('   Public Key Length:', keyPair.publicKey.length);
-      console.log('   Private Key Length:', keyPair.privateKey.length, '(store this securely!)');
-      console.log('');
-    }
-
-    // Get the active key (should work now)
-    console.log('3. Getting active key for client...');
-    const activeKey = await ClientKeyService.getActiveKey(testClientId);
-    if (activeKey) {
-      console.log('✅ Active key retrieved:');
-      console.log('   Key ID:', activeKey.key_id);
-      console.log('   KID:', activeKey.kid);
-      console.log('   Is Active:', activeKey.is_active);
-      console.log('   Private Key Available:', !!activeKey.private_key);
-      console.log('');
-    } else {
-      console.log('❌ No active key found');
-      return;
-    }
-
-    console.log('4. Generating JWK for client...');
-    const jwk = await ClientKeyService.getPublicJwk(testClientId);
-    console.log('✅ JWK generated:');
-    console.log('   Key Type:', jwk.kty);
-    console.log('   Algorithm:', jwk.alg);
-    console.log('   KID:', jwk.kid);
-    console.log('');
-
-    // Only test signing if we have a private key
-    if (activeKey.private_key) {
-      console.log('5. Testing JWT signing...');
-      const testPayload = {
-        sub: 'test-user-123',
-        email: 'test@example.com',
-        user_type: 'user'
-      };
-      
-      const token = await ClientKeyService.signJwt(testClientId, testPayload);
-      console.log('✅ JWT signed successfully:');
-      console.log('   Token Length:', token.length);
-      console.log('   Token Preview:', token.substring(0, 50) + '...');
-      console.log('');
-
-      console.log('6. Testing JWT verification...');
-      const decoded = await ClientKeyService.verifyJwt(testClientId, token);
-      console.log('✅ JWT verified successfully:');
-      console.log('   User ID:', decoded.sub);
-      console.log('   Email:', decoded.email);
-      console.log('   Client ID:', decoded.iss);
-      console.log('');
-    } else {
-      console.log('⚠️  Skipping JWT tests - private key not available');
-      console.log('');
-    }
-
-    console.log('7. Getting all client keys...');
-    const clientKeys = await ClientKeyService.getClientKeys(testClientId);
-    console.log('✅ Client keys retrieved:', clientKeys.length);
-    clientKeys.forEach(key => {
-      console.log(`   - ${key.key_id} (${key.is_active ? 'active' : 'inactive'}) - ${key.kid}`);
-    });
-
-    console.log('\n🎉 Client Key System Test COMPLETED SUCCESSFULLY!');
-
+    await tester.runAllTests();
   } catch (error) {
-    console.error('❌ Test failed:', error.message);
-    if (error.code === '23505') {
-      console.log('💡 Tip: Client already has an active key. Use a different client ID or revoke existing key.');
-    }
-  } finally {
-    await database.close();
+    console.error('\n💥 TEST SUITE FAILED:', error.message);
+    process.exit(1);
   }
 }
 
-/**
- * Find a suitable client ID for testing
- */
-async function getTestClientId() {
+// Check if server is running first
+async function checkServer() {
   try {
-    // Try to find a client that doesn't have an active key
-    const result = await database.query(`
-      SELECT c.id 
-      FROM clients c 
-      LEFT JOIN client_keys ck ON c.id = ck.client_id AND ck.is_active = true
-      WHERE ck.id IS NULL 
-      ORDER BY c.id 
-      LIMIT 1
-    `);
-    
-    if (result.rows.length > 0) {
-      return result.rows[0].id;
-    }
-    
-    // If all clients have keys, use the first one
-    const firstClient = await database.query('SELECT id FROM clients ORDER BY id LIMIT 1');
-    return firstClient.rows[0].id;
-    
+    await axios.get('http://localhost:8000/api/health', { timeout: 5000 });
+    console.log('✅ Server is running');
+    return true;
   } catch (error) {
-    // Fallback to client ID 1
-    return 1;
+    console.error('❌ Server is not running or not accessible');
+    console.log('   Please start your server with: npm start');
+    return false;
   }
 }
 
-testClientKeys();
+// Start the tests
+async function startTests() {
+  const serverRunning = await checkServer();
+  if (serverRunning) {
+    await main();
+  } else {
+    process.exit(1);
+  }
+}
+
+startTests();

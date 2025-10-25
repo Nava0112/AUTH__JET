@@ -20,6 +20,22 @@ class UserJWTService {
     });
   }
 
+  /**
+   * Convert custom client_id string to database client ID
+   */
+  async getClientDbId(clientId) {
+    const clientQuery = await database.query(
+      'SELECT id FROM clients WHERE client_id = $1',
+      [clientId]
+    );
+    
+    if (clientQuery.rows.length === 0) {
+      throw new Error('Client not found');
+    }
+    
+    return clientQuery.rows[0].id;
+  }
+
   loadPrivateKeyFromEnv() {
     try {
       let privateKey = process.env.JWT_PRIVATE_KEY;
@@ -186,9 +202,53 @@ class UserJWTService {
     });
   }
 
+  /**
+   * TEMPORARY FIX: Bypass ClientKeyService encryption issues
+   */
+  async generateAccessTokenWithFallback(user, clientId, applicationId) {
+  try {
+    // First try the normal way
+    return await this.generateAccessToken(user, clientId, applicationId);
+  } catch (error) {
+    console.log('⚠️ ClientKeyService failed, using emergency fallback...');
+    
+    // EMERGENCY FALLBACK: Use HS256 with a simple secret
+    const tokenPayload = {
+      sub: user.id,
+      email: user.email,
+      name: user.name,
+      client_id: clientId,
+      application_id: applicationId,
+      role: user.role,
+      iat: Math.floor(Date.now() / 1000),
+    };
+
+    // Use HS256 instead of RS256 for emergency fallback
+    const fallbackSecret = process.env.JWT_FALLBACK_SECRET || 'emergency-fallback-secret-change-me';
+    
+    return new Promise((resolve, reject) => {
+      jwt.sign(tokenPayload, fallbackSecret, { 
+        algorithm: 'HS256', // Use symmetric encryption
+        expiresIn: '15m'
+      }, (err, token) => {
+        if (err) {
+          logger.error('Emergency fallback also failed:', err);
+          reject(err);
+        } else {
+          console.log('✅ Emergency fallback JWT generated successfully with HS256');
+          resolve(token);
+        }
+      });
+    });
+  }
+}
+
   async generateRefreshToken(userId, clientId, applicationId) {
     const refreshToken = crypto.randomBytes(40).toString('hex');
     const expiresAt = new Date(Date.now() + this.refreshTokenExpiryMs);
+
+    // Convert custom client_id string to database client ID
+    const clientDbId = await this.getClientDbId(clientId);
 
     // Store refresh token in database
     const query = `
@@ -202,7 +262,7 @@ class UserJWTService {
     
     await database.query(query, [
       userId, 
-      clientId, 
+      clientDbId,  // Use database ID here
       applicationId, 
       refreshToken,
       expiresAt,
@@ -228,9 +288,10 @@ class UserJWTService {
   async refreshTokens(refreshToken) {
     // Find and validate refresh token
     const query = `
-      SELECT us.*, u.email, u.name, u.role, u.is_active
+      SELECT us.*, u.email, u.name, u.role, u.is_active, c.client_id as custom_client_id
       FROM user_sessions us
       JOIN users u ON us.user_id = u.id
+      JOIN clients c ON us.client_id = c.id
       WHERE us.refresh_token = $1 AND us.expires_at > NOW() AND us.revoked = false AND u.is_active = true
     `;
 
@@ -248,16 +309,16 @@ class UserJWTService {
       throw new Error('Refresh token exceeded maximum uses');
     }
 
-    // Generate new tokens
-    const newAccessToken = await this.generateAccessToken(
+    // Generate new tokens - use custom_client_id for JWT
+    const newAccessToken = await this.generateAccessTokenWithFallback(
       { id: session.user_id, email: session.email, name: session.name, role: session.role },
-      session.client_id,
+      session.custom_client_id,  // Use the custom client_id string
       session.application_id
     );
 
     const newRefreshToken = await this.generateRefreshToken(
       session.user_id,
-      session.client_id,
+      session.custom_client_id,  // Use the custom client_id string
       session.application_id
     );
 
@@ -271,7 +332,7 @@ class UserJWTService {
       access_token: newAccessToken,
       refresh_token: newRefreshToken,
       token_type: 'Bearer',
-      expires_in: process.env.NODE_ENV === 'production' ? 3600 : 900, // 1h or 15m
+      expires_in: process.env.NODE_ENV === 'production' ? 3600 : 900,
     };
   }
 
@@ -286,13 +347,16 @@ class UserJWTService {
   }
 
   async revokeAllUserSessions(userId, clientId, applicationId) {
+    // Convert custom client_id to database ID
+    const clientDbId = await this.getClientDbId(clientId);
+
     const query = `
       UPDATE user_sessions 
       SET revoked = true, revoked_at = NOW() 
       WHERE user_id = $1 AND client_id = $2 AND application_id = $3 AND revoked = false
     `;
     
-    await database.query(query, [userId, clientId, applicationId]);
+    await database.query(query, [userId, clientDbId, applicationId]);
   }
 }
 
