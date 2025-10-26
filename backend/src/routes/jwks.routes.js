@@ -53,6 +53,19 @@ router.get('/jwks.json', authenticateApplication, async (req, res) => {
   }
 });
 
+// Add this to jwks.routes.js temporarily
+router.get('/debug-key/:clientIdString', async (req, res) => {
+  try {
+    const { clientIdString } = req.params;
+    const debugResult = await ClientKeyService.debugPrivateKeyDecryption(clientIdString);
+    console.log('Debug result:', debugResult);
+    res.json(debugResult);
+  } catch (error) {
+    console.error('Debug error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // BACKWARD COMPATIBILITY: Public endpoint (FIXED VERSION)
 router.get('/clients/:clientIdString/jwks.json', async (req, res) => {
   try {

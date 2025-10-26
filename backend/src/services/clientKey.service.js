@@ -580,6 +580,7 @@ class ClientKeyService {
       throw error;
     }
   }
+  
   // Add this temporary debug method to your ClientKeyService
 async debugEncryptionIssue(clientId) {
   try {

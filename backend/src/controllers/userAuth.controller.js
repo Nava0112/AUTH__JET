@@ -221,7 +221,7 @@ async login(req, res, next) {
 
     console.log('Login attempt:', { email, client_id, application_id });
 
-    // Find user for this specific application
+    // Find user for this specific application - FIXED QUERY
     const userQuery = `
       SELECT 
         u.*, 
@@ -231,10 +231,14 @@ async login(req, res, next) {
         ca.roles_config,
         ca.default_role
       FROM users u
-      JOIN client_applications ca ON u.application_id = ca.id
       JOIN clients c ON u.client_id = c.id
-      WHERE u.email = $1 AND c.client_id = $2 AND u.application_id = $3
-      AND u.is_active = true AND ca.is_active = true AND c.is_active = true
+      JOIN client_applications ca ON u.application_id = ca.id
+      WHERE u.email = $1 
+        AND c.client_id = $2 
+        AND u.application_id = $3
+        AND u.is_active = true 
+        AND ca.is_active = true 
+        AND c.is_active = true
     `;
     
     console.log('Executing user query with:', [email, client_id, application_id]);
@@ -245,35 +249,40 @@ async login(req, res, next) {
       // Detailed debugging for why no user found
       console.log('No user found. Running diagnostic checks...');
       
-      // Check client
+      // Check client by string client_id
       const clientCheck = await database.query(
         'SELECT id, client_id, name, is_active FROM clients WHERE client_id = $1',
         [client_id]
       );
       console.log('Client check:', clientCheck.rows[0] || 'Not found');
       
-      // Check application
+      // Check application by numeric ID
       const appCheck = await database.query(
         'SELECT id, name, client_id, is_active FROM client_applications WHERE id = $1',
         [application_id]
       );
       console.log('Application check:', appCheck.rows[0] || 'Not found');
       
-      // Check if application belongs to client
+      // Check if application belongs to client (using numeric client ID from clients table)
       if (appCheck.rows.length > 0 && clientCheck.rows.length > 0) {
         const appClientMatch = await database.query(
-          'SELECT ca.id FROM client_applications ca JOIN clients c ON ca.client_id = c.id WHERE ca.id = $1 AND c.client_id = $2',
-          [application_id, client_id]
+          'SELECT ca.id FROM client_applications ca WHERE ca.id = $1 AND ca.client_id = $2',
+          [application_id, clientCheck.rows[0].id]
         );
         console.log('Application-client match:', appClientMatch.rows.length ? 'Matches' : 'No match');
       }
       
-      // Check user with just email
+      // Check user with just email to see if they exist in other clients/applications
       const userEmailCheck = await database.query(
-        'SELECT id, email, client_id, application_id, is_active FROM users WHERE email = $1',
+        `SELECT u.id, u.email, u.client_id, u.application_id, u.is_active, 
+                c.client_id as client_string_id, ca.name as app_name
+         FROM users u
+         JOIN clients c ON u.client_id = c.id
+         JOIN client_applications ca ON u.application_id = ca.id
+         WHERE u.email = $1`,
         [email]
       );
-      console.log('User by email only:', userEmailCheck.rows);
+      console.log('User by email only (with client/app info):', userEmailCheck.rows);
 
       return res.status(401).json({
         error: 'Invalid credentials or application',
@@ -281,7 +290,10 @@ async login(req, res, next) {
         debug: {
           client_exists: clientCheck.rows.length > 0,
           application_exists: appCheck.rows.length > 0,
-          user_by_email_exists: userEmailCheck.rows.length > 0
+          user_by_email_exists: userEmailCheck.rows.length > 0,
+          user_matches_client_app: userEmailCheck.rows.some(user => 
+            user.client_string_id === client_id && user.application_id == application_id
+          )
         }
       });
     }
@@ -291,7 +303,9 @@ async login(req, res, next) {
       userId: user.id, 
       email: user.email, 
       role: user.role,
-      isActive: user.is_active 
+      isActive: user.is_active,
+      clientId: user.client_id, // numeric
+      applicationId: user.application_id // numeric
     });
 
     // Extract roles for the response
