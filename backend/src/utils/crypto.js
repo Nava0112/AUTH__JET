@@ -16,15 +16,15 @@ class CryptoUtils {
   // ============================================
 
   getEncryptionKey() {
-    let key = process.env.ENCRYPTION_KEY;
+    let key = process.env.KEY_ENCRYPTION_KEY;
     
     if (!key) {
-      logger.warn('ENCRYPTION_KEY not found, using JWT secret as fallback');
+      logger.warn('KEY_ENCRYPTION_KEY not found, using JWT secret as fallback');
       key = process.env.JWT_SECRET;
     }
     
     if (!key) {
-      throw new Error('No encryption key available. Set ENCRYPTION_KEY environment variable.');
+      throw new Error('No encryption key available. Set KEY_ENCRYPTION_KEY environment variable.');
     }
     
     return crypto.createHash('sha256').update(key).digest();
