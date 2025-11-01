@@ -42,7 +42,7 @@ temp/
 
 backend/.env
 backend/.env.backup
-.env
+*.env
 .env.local
 .env.production
 
@@ -52,3 +52,5 @@ keys/*.key
 *.node_modules
 *.tsbuildinfo
 *md
+
+backend/reports/
