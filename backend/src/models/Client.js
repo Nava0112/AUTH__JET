@@ -4,14 +4,42 @@ const logger = require('../utils/logger');
 
 class Client {
   static async create(clientData) {
-    const { name, contact_email, website, business_type, allowed_domains = [], default_roles = ['user'] } = clientData;
-    
-    try {
-      const apiKey = 'cli_' + crypto.randomString(16);
-      const secretKey = crypto.randomString(32);
-      const secretKeyHash = await crypto.hashPassword(secretKey);
+  const { name, contact_email, website, business_type, allowed_domains = [], default_roles = ['user'] } = clientData;
+  
+  try {
+    const apiKey = 'cli_' + crypto.randomString(16);
+    const secretKey = crypto.randomString(32);
+    const secretKeyHash = await crypto.hashPassword(secretKey);
 
-      const query = `
+    // Generate RSA key pair for this client
+    const { generateKeyPair } = require('crypto');
+    const keyPair = await new Promise((resolve, reject) => {
+      generateKeyPair('rsa', {
+        modulusLength: 2048,
+        publicKeyEncoding: {
+          type: 'spki',
+          format: 'pem'
+        },
+        privateKeyEncoding: {
+          type: 'pkcs8',
+          format: 'pem'
+        }
+      }, (err, publicKey, privateKey) => {
+        if (err) reject(err);
+        else resolve({ publicKey, privateKey });
+      });
+    });
+
+    const keyId = `kid_${crypto.randomString(8)}`;
+    const encryptedPrivateKey = crypto.encrypt(privateKey, process.env.ENCRYPTION_KEY);
+
+    // Start transaction
+    const client = await database.getClient();
+    await client.query('BEGIN');
+
+    try {
+      // Create client
+      const clientQuery = `
         INSERT INTO clients (
           name, contact_email, website, business_type, 
           api_key, secret_key_hash, allowed_domains, default_roles
@@ -20,29 +48,47 @@ class Client {
         RETURNING *
       `;
       
-      const result = await database.query(query, [
-        name,
-        contact_email,
-        website,
-        business_type,
-        apiKey,
-        secretKeyHash,
-        JSON.stringify(allowed_domains),
-        JSON.stringify(default_roles),
+      const clientResult = await client.query(clientQuery, [
+        name, contact_email, website, business_type,
+        apiKey, secretKeyHash, 
+        JSON.stringify(allowed_domains), JSON.stringify(default_roles),
       ]);
 
-      const client = result.rows[0];
+      const newClient = clientResult.rows[0];
+
+      // Store key pair
+      const keyQuery = `
+        INSERT INTO client_keys (
+          client_id, key_id, public_key, private_key_encrypted, 
+          algorithm, key_type, key_size, key_usage
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `;
       
-      // Return client with sensitive data (only once)
+      await client.query(keyQuery, [
+        newClient.id, keyId, keyPair.publicKey, encryptedPrivateKey,
+        'RS256', 'RSA', 2048, 'signing'
+      ]);
+
+      await client.query('COMMIT');
+      
       return {
-        ...client,
+        ...newClient,
         secret_key: secretKey,
+        key_id: keyId // Return key ID for reference
       };
+      
     } catch (error) {
-      logger.error('Client creation error:', error);
+      await client.query('ROLLBACK');
       throw error;
+    } finally {
+      client.release();
     }
+  } catch (error) {
+    logger.error('Client creation error:', error);
+    throw error;
   }
+}
 
   static async findById(id) {
     try {

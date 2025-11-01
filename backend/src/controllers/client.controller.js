@@ -2,6 +2,7 @@ const crypto = require('../utils/crypto');
 const database = require('../utils/database');
 const logger = require('../utils/logger');
 const emailService = require('../services/email.service');
+const ClientKeyService = require('../services/clientKey.service');
 
 class ClientController {
   async createClient(req, res, next) {
@@ -35,6 +36,18 @@ class ClientController {
       ]);
 
       const client = result.rows[0];
+
+      // Generate RSA key pair for the client
+      try {
+        const keyPair = await ClientKeyService.generateKeyPair(client.id);
+        logger.info('Client RSA key pair generated', { 
+          clientId: client.id, 
+          keyId: keyPair.keyId 
+        });
+      } catch (keyError) {
+        logger.error('Failed to generate RSA key pair for client:', keyError);
+        // Don't fail client creation if key generation fails
+      }
 
       // Send welcome email with credentials
       try {

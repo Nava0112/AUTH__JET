@@ -1,7 +1,8 @@
 const bcrypt = require('bcryptjs');
 const database = require('../utils/database');
 const logger = require('../utils/logger');
-
+const crypto = require('crypto');
+const ClientKeyService = require('../services/clientKey.service');
 class SimpleClientController {
   async register(req, res, next) {
     try {
@@ -58,6 +59,20 @@ class SimpleClientController {
 
       const client = result.rows[0];
 
+      // CRITICAL: Auto-generate RSA key pair for this client
+      // This is required for JWT token signing for end-users
+      let keyPair = null;
+      try {
+        keyPair = await ClientKeyService.generateKeyPair(client.id);
+        logger.info('RSA key pair auto-generated for new client', { 
+          clientId: client.id, 
+          keyId: keyPair.keyId 
+        });
+      } catch (keyError) {
+        logger.error('Failed to auto-generate RSA keys for client:', keyError);
+        // Don't fail registration, but warn that keys need to be generated manually
+      }
+
       logger.info('Client organization created successfully', { clientId: client.id });
 
       res.status(201).json({
@@ -71,6 +86,17 @@ class SimpleClientController {
           clientId: client.client_id,
           clientSecret: client.client_secret,
           planType: client.plan_type
+        },
+        // Include key information if generated successfully
+        keys: keyPair ? {
+          keyId: keyPair.keyId,
+          kid: keyPair.kid,
+          algorithm: keyPair.algorithm,
+          jwksUrl: `/api/public/clients/${client.id}/jwks.json`,
+          note: 'RSA keys auto-generated. Public key available at JWKS endpoint.'
+        } : {
+          warning: 'RSA keys not generated. Please generate keys manually before users can authenticate.',
+          generateUrl: '/api/client/keys/generate'
         }
       });
 
@@ -122,13 +148,19 @@ class SimpleClientController {
         });
       }
   
-      // ✅ ADD TOKEN GENERATION
-      const jwtService = require('../services/jwt.service');
-      const accessToken = await jwtService.generateAccessToken({
-        sub: client.id,
-        email: client.email,
-        type: 'client'
-      });
+      // ✅ ADD TOKEN GENERATION (using simple JWT with platform secret)
+      const jwt = require('jsonwebtoken');
+      const accessToken = jwt.sign(
+        {
+          sub: client.id,
+          email: client.email,
+          name: client.name,
+          type: 'client',
+          iat: Math.floor(Date.now() / 1000)
+        },
+        process.env.JWT_SECRET || 'default-jwt-secret-change-in-production',
+        { expiresIn: '24h' }
+      );
   
       // ✅ ADD SESSION CREATION
       try {

@@ -228,7 +228,38 @@ class DatabaseConfig {
     }
   }
 
-  // ... other methods remain the same
+  setupGracefulShutdown() {
+    const shutdown = async (signal) => {
+      logger.info(`Received ${signal}, closing database connections...`);
+      
+      if (this.pool) {
+        await this.pool.end();
+        logger.info('Database pool closed');
+      }
+      
+      if (this.knex) {
+        await this.knex.destroy();
+        logger.info('Knex connection closed');
+      }
+    };
+
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT', () => shutdown('SIGINT'));
+  }
+
+  async close() {
+    if (this.pool) {
+      await this.pool.end();
+      this.pool = null;
+      logger.info('Database pool closed');
+    }
+    
+    if (this.knex) {
+      await this.knex.destroy();
+      this.knex = null;
+      logger.info('Knex connection closed');
+    }
+  }
 }
 
 const databaseConfig = new DatabaseConfig();

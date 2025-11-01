@@ -6,17 +6,17 @@ const ClientKeyService = require('./clientKey.service');
 
 /**
  * User JWT Service using CLIENT-SPECIFIC RSA keys
+ * This is the CORRECT implementation for multi-tenant architecture
+ * 
  * Each client has their own RSA key pair in client_keys table
  * User tokens are signed with the client's private key
  * Client applications verify tokens with their public key from JWKS endpoint
  */
-class UserJWTService {
+class UserJwtClientService {
   constructor() {
     this.algorithm = 'RS256';
     this.accessTokenExpiry = process.env.NODE_ENV === 'production' ? '1h' : '15m';
     this.refreshTokenExpiryMs = 7 * 24 * 60 * 60 * 1000; // 7 days
-    this.issuer = 'authjet-saas';
-    this.audience = 'client-app-users';
   }
 
   /**
@@ -38,8 +38,8 @@ class UserJWTService {
         role: user.role,
         client_id: clientId,
         application_id: applicationId,
-        iss: this.issuer,
-        aud: this.audience,
+        iss: `authjet-client-${clientId}`, // Issuer identifies the client
+        aud: `application-${applicationId}`, // Audience is the specific application
         iat: Math.floor(Date.now() / 1000),
       };
 
@@ -75,46 +75,12 @@ class UserJWTService {
   }
 
   /**
-   * TEMPORARY FIX: Bypass ClientKeyService encryption issues
-   */
-  async generateAccessTokenWithFallback(user, clientId, applicationId) {
-    try {
-      // First try the normal way with client-specific keys
-      return await this.generateAccessToken(user, clientId, applicationId);
-    } catch (error) {
-      console.log('⚠️ ClientKeyService failed, using fallback JWT...');
-      
-      // Fallback: Use simple JWT without client-specific keys
-      const tokenPayload = {
-        sub: user.id,
-        email: user.email,
-        name: user.name,
-        client_id: clientId,
-        application_id: applicationId,
-        role: user.role,
-        iat: Math.floor(Date.now() / 1000),
-      };
-
-      // Use a simple secret for fallback
-      const fallbackSecret = process.env.JWT_FALLBACK_SECRET || 'fallback-secret-change-in-production';
-      
-      return jwt.sign(tokenPayload, fallbackSecret, { 
-        algorithm: 'HS256',
-        expiresIn: '15m'
-      });
-    }
-  }
-
-  /**
    * Generate refresh token and store in database
    */
   async generateRefreshToken(userId, clientId, applicationId) {
     try {
       const refreshToken = crypto.randomBytes(40).toString('hex');
       const expiresAt = new Date(Date.now() + this.refreshTokenExpiryMs);
-
-      // Convert custom client_id string to database client ID
-      const clientDbId = await ClientKeyService.getClientDbId(clientId);
 
       // Store refresh token in database
       const query = `
@@ -128,7 +94,7 @@ class UserJWTService {
       
       await database.query(query, [
         userId, 
-        clientDbId,
+        clientId, 
         applicationId, 
         refreshToken,
         expiresAt,
@@ -162,7 +128,7 @@ class UserJWTService {
           key.public_key, 
           { 
             algorithms: [this.algorithm],
-            issuer: this.issuer
+            issuer: `authjet-client-${clientId}`
           }, 
           (err, decoded) => {
             if (err) {
@@ -181,16 +147,47 @@ class UserJWTService {
   }
 
   /**
+ * TEMPORARY FIX: Bypass ClientKeyService encryption issues
+ */
+async generateAccessTokenWithFallback(user, clientId, applicationId) {
+  try {
+    // First try the normal way
+    return await this.generateAccessToken(user, clientId, applicationId);
+  } catch (error) {
+    console.log('⚠️ ClientKeyService failed, using fallback JWT...');
+    
+    // Fallback: Use simple JWT without client-specific keys
+    const jwt = require('jsonwebtoken');
+    
+    const tokenPayload = {
+      sub: user.id,
+      email: user.email,
+      name: user.name,
+      client_id: clientId,
+      application_id: applicationId,
+      role: user.role,
+      iat: Math.floor(Date.now() / 1000),
+    };
+
+    // Use a simple secret for fallback
+    const fallbackSecret = process.env.JWT_FALLBACK_SECRET || 'fallback-secret-change-in-production';
+    
+    return jwt.sign(tokenPayload, fallbackSecret, { 
+      algorithm: 'HS256',
+      expiresIn: '15m'
+    });
+  }
+}
+  /**
    * Refresh tokens - generates new access and refresh tokens
    */
   async refreshTokens(refreshToken) {
     try {
       // Find and validate refresh token
       const query = `
-        SELECT us.*, u.email, u.name, u.role, u.is_active, c.client_id as custom_client_id
+        SELECT us.*, u.email, u.name, u.role, u.is_active
         FROM user_sessions us
         JOIN users u ON us.user_id = u.id
-        JOIN clients c ON us.client_id = c.id
         WHERE us.refresh_token = $1 AND us.expires_at > NOW() AND us.revoked = false AND u.is_active = true
       `;
 
@@ -216,15 +213,15 @@ class UserJWTService {
         role: session.role
       };
 
-      const newAccessToken = await this.generateAccessTokenWithFallback(
+      const newAccessToken = await this.generateAccessToken(
         user,
-        session.custom_client_id,
+        session.client_id,
         session.application_id
       );
 
       const newRefreshToken = await this.generateRefreshToken(
         session.user_id,
-        session.custom_client_id,
+        session.client_id,
         session.application_id
       );
 
@@ -236,7 +233,7 @@ class UserJWTService {
 
       logger.info('Tokens refreshed successfully', { 
         userId: session.user_id, 
-        clientId: session.custom_client_id 
+        clientId: session.client_id 
       });
 
       return {
@@ -269,16 +266,13 @@ class UserJWTService {
    * Revoke all sessions for a user
    */
   async revokeAllUserSessions(userId, clientId, applicationId) {
-    // Convert custom client_id to database ID
-    const clientDbId = await ClientKeyService.getClientDbId(clientId);
-
     const query = `
       UPDATE user_sessions 
       SET revoked = true, revoked_at = NOW() 
       WHERE user_id = $1 AND client_id = $2 AND application_id = $3 AND revoked = false
     `;
     
-    await database.query(query, [userId, clientDbId, applicationId]);
+    await database.query(query, [userId, clientId, applicationId]);
     logger.info('All user sessions revoked', { userId, clientId, applicationId });
   }
 
@@ -287,7 +281,7 @@ class UserJWTService {
    */
   async generateTokenPair(user, clientId, applicationId) {
     try {
-      const accessToken = await this.generateAccessTokenWithFallback(user, clientId, applicationId);
+      const accessToken = await this.generateAccessToken(user, clientId, applicationId);
       const refreshToken = await this.generateRefreshToken(user.id, clientId, applicationId);
 
       return {
@@ -303,4 +297,5 @@ class UserJWTService {
   }
 }
 
-module.exports = new UserJWTService();
+module.exports = new UserJwtClientService();
+

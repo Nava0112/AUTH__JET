@@ -339,7 +339,8 @@ class AuthController {
       req.get('Accept-Encoding'),
     ].filter(Boolean).join('|');
     
-    return crypto.createHash('sha256').update(components).digest('hex');
+    const nodeCrypto = require('crypto');
+    return nodeCrypto.createHash('sha256').update(components).digest('hex');
   }
 
   async refreshToken(req, res, next) {
@@ -370,7 +371,8 @@ class AuthController {
     
     try {
       if (refresh_token) {
-        const hashedToken = crypto.createHash('sha256').update(refresh_token).digest('hex');
+        const nodeCrypto = require('crypto');
+        const hashedToken = nodeCrypto.createHash('sha256').update(refresh_token).digest('hex');
         await jwtService.revokeRefreshToken(hashedToken);
       }
 

@@ -4,7 +4,7 @@
  * Quick fix script to assign admin roles to users who need access to client management
  */
 
-const { assignAdminRoles } = require('./scripts/assign-admin-roles');
+const { assignAdminRoles } = require('../scripts/assign-admin-roles');
 
 console.log('🚀 JWT Guard - Permission Fix Script');
 console.log('=====================================');

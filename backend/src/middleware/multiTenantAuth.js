@@ -100,7 +100,12 @@ const authenticateClient = async (req, res, next) => {
     const token = authHeader.substring(7);
 
     try {
-      const decoded = await jwtService.verifyToken(token);
+      // Client tokens are signed with platform secret (not client-specific keys)
+      const jwt = require('jsonwebtoken');
+      const decoded = jwt.verify(
+        token, 
+        process.env.JWT_SECRET || 'default-jwt-secret-change-in-production'
+      );
       
       // Verify client exists and is active
       const clientQuery = `
@@ -184,6 +189,7 @@ const authenticateUser = async (req, res, next) => {
       const decoded = await jwtService.verifyToken(token);
       
       // Verify user exists and is active
+      // In authenticateUser - SQL Injection Risk
       const userQuery = `
         SELECT u.*, c.name as client_name, ca.name as application_name, ca.auth_type
         FROM users u
@@ -268,12 +274,12 @@ const authenticateApplication = async (req, res, next) => {
     }
 
     // Verify application exists and is active
-    const appQuery = `
-      SELECT ca.*, c.name as client_name, c.is_active as client_active
-      FROM client_applications ca
-      JOIN clients c ON ca.client_id = c.id
-      WHERE ca.client_id_key = $1 AND ca.is_active = true AND c.is_active = true
-    `;
+      const appQuery = `
+    SELECT ca.*, c.name as client_name, c.is_active as client_active
+    FROM client_applications ca
+    JOIN clients c ON ca.client_id = c.id
+    WHERE c.client_id = $1 AND ca.is_active = true AND c.is_active = true
+  `;
     
     const appResult = await database.query(appQuery, [clientId]);
     

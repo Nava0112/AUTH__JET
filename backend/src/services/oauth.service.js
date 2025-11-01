@@ -4,13 +4,18 @@ const GitHubStrategy = require('passport-github2').Strategy;
 const database = require('../utils/database');
 const logger = require('../utils/logger');
 const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
+const ClientKeyService = require('./clientKey.service');
 
 class OAuthService {
   constructor() {
     this.initializeStrategies();
   }
   initializeStrategies() {
+    // Skip strategy initialization in test environment
+    if (process.env.NODE_ENV === 'test') {
+      return;
+    }
+
     // Google OAuth Strategy
     passport.use('google-client', new GoogleStrategy({
       clientID: process.env.GOOGLE_CLIENT_ID,
@@ -360,7 +365,8 @@ class OAuthService {
         );
       }
 
-      // Generate JWT token for admin
+      // Generate JWT token for admin using platform key
+      const jwt = require('jsonwebtoken');
       const token = jwt.sign(
         {
           sub: admin.id,
@@ -428,6 +434,17 @@ class OAuthService {
         
         client = insertResult.rows[0];
         
+        // Generate RSA key pair for new OAuth client
+        try {
+          const keyPair = await ClientKeyService.generateKeyPair(client.id);
+          logger.info('OAuth client RSA key pair generated', { 
+            clientId: client.id, 
+            keyId: keyPair.keyId 
+          });
+        } catch (keyError) {
+          logger.error('Failed to generate RSA key pair for OAuth client:', keyError);
+        }
+        
         logger.info('New client created via OAuth', { 
           clientId: client.id, 
           email: client.email, 
@@ -474,19 +491,15 @@ class OAuthService {
         });
       }
 
-      // Generate JWT token for client
-      const token = jwt.sign(
-        {
-          sub: client.id,
-          email: email.toLowerCase(),
-          name: name || client.name,
-          type: 'client',
-          provider: provider,
-          iat: Math.floor(Date.now() / 1000)
-        },
-        process.env.JWT_SECRET,
-        { expiresIn: '24h' }
-      );
+      // Generate JWT token for client using client's RSA key
+      const token = await ClientKeyService.signJwt(client.id, {
+        sub: client.id,
+        email: email.toLowerCase(),
+        name: name || client.name,
+        type: 'client',
+        provider: provider,
+        iat: Math.floor(Date.now() / 1000)
+      });
 
       return {
         success: true,
