@@ -1,7 +1,7 @@
 const express = require('express');
 const { authenticateClient, requireRole } = require('../middleware/multiTenantAuth');
 const { createUserRateLimit } = require('../middleware/rateLimit');
-const clientAuthController = require('../controllers/simple.client.controller');
+const clientAuthController = require('../controllers/clientAuth.controller');
 
 const router = express.Router();
 
@@ -25,7 +25,7 @@ router.post('/change-password', clientAuthController.changePassword);
 router.post('/logout', clientAuthController.logout);
 
 // Client dashboard
-router.get('/dashboard/stats', clientAuthController.getDashboard);
+router.get('/dashboard/stats', clientAuthController.getDashboardStats);
 
 // Application management
 router.get('/applications', clientAuthController.getApplications);
@@ -34,6 +34,11 @@ router.get('/applications/:id', clientAuthController.getApplication);
 router.put('/applications/:id', clientAuthController.updateApplication);
 router.delete('/applications/:id', clientAuthController.deleteApplication);
 router.post('/applications/:id/regenerate-secret', clientAuthController.regenerateApplicationSecret);
+
+// Key management
+router.get('/applications/:id/keys', clientAuthController.getApplicationKeys);
+router.post('/applications/:id/keys/rotate', clientAuthController.rotateApplicationKeys);
+router.get('/applications/:id/jwks', clientAuthController.getApplicationJwks);
 
 // User management for client applications
 router.get('/applications/:appId/users', clientAuthController.getApplicationUsers);

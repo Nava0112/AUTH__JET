@@ -1,7 +1,7 @@
 const express = require('express');
 const { authenticateAdmin, requireRole } = require('../middleware/multiTenantAuth');
 const { createUserRateLimit } = require('../middleware/rateLimit');
-const adminController = require('../controllers/simple.admin.controller');
+const adminController = require('../controllers/admin.controller');
 
 const router = express.Router();
 
@@ -18,8 +18,8 @@ router.post('/reset-password', adminController.resetPassword);
 router.get('/approve/:token', adminController.approveAdminRequest);
 router.get('/reject/:token', adminController.rejectAdminRequest);
 
-// Protected admin routes (temporarily disabled for testing)
-// router.use(authenticateAdmin);
+// Protected admin routes
+router.use(authenticateAdmin);
 
 // Admin profile management
 router.get('/profile', adminController.getProfile);
@@ -40,6 +40,7 @@ router.post('/clients/:id/activate', adminController.activateClient);
 
 // Client applications management
 router.get('/clients/:clientId/applications', adminController.getClientApplications);
+router.get('/clients/:clientId/users', adminController.getClientUsers);
 router.get('/applications/:id', adminController.getApplication);
 
 // Platform analytics

@@ -1,126 +1,192 @@
 const express = require('express');
-const { authenticateUser } = require('../middleware/userAuth');
+const { authenticateApplication } = require('../middleware/applicationAuth');
+const { authenticateUser } = require('../middleware/multiTenantAuth');
 const userAuthController = require('../controllers/userAuth.controller');
 const database = require('../utils/database');
 const logger = require('../utils/logger');
 
 const router = express.Router();
 
-// Public routes - no authentication required
-router.post('/register', userAuthController.register.bind(userAuthController));
-router.post('/login', userAuthController.login.bind(userAuthController));
-router.post('/refresh-token', userAuthController.refreshToken.bind(userAuthController));
-router.post('/verify-email', userAuthController.verifyEmail.bind(userAuthController));
-router.post('/resend-verification', userAuthController.resendVerificationEmail.bind(userAuthController));
+/**
+ * User Authentication Routes
+ * 
+ * UPDATED: Now uses application authentication middleware.
+ * Client apps must provide X-Application-ID and X-Application-Secret headers.
+ * 
+ * Flow:
+ * 1. Client app sends request with application credentials in headers
+ * 2. authenticateApplication middleware validates credentials
+ * 3. req.application and req.clientId are populated
+ * 4. Controller uses application context for user operations
+ */
 
-    // Client application info endpoint - FIXED with correct schema
-    router.get('/applications/:application_id', async (req, res) => {
-      try {
-        const { application_id } = req.params;
-        const client_id = req.query.client_id;
+// ============================================================================
+// PUBLIC ROUTES - Require Application Authentication
+// ============================================================================
 
-        if (!client_id) {
-          return res.status(400).json({
-            error: 'client_id query parameter is required',
-            code: 'MISSING_CLIENT_ID',
-          });
-        }
+/**
+ * User Registration
+ * Headers: X-Application-ID, X-Application-Secret
+ * Body: { email, password, name, requested_role? }
+ */
+router.post('/register',
+  authenticateApplication,
+  userAuthController.register.bind(userAuthController)
+);
 
-        const query = `
-          SELECT 
-            id, 
-            name, 
-            description, 
-            auth_mode,
-            main_page_url,
-            redirect_url,
-            default_role,
-            is_active,
-            roles_config
-          FROM client_applications 
-          WHERE id = $1 AND client_id = $2 AND is_active = true
-        `;
-        
-        const result = await database.query(query, [application_id, client_id]);
+/**
+ * User Login
+ * Headers: X-Application-ID, X-Application-Secret
+ * Body: { email, password }
+ */
+router.post('/login',
+  authenticateApplication,
+  userAuthController.login.bind(userAuthController)
+);
 
-        if (result.rows.length === 0) {
-          return res.status(404).json({
-            error: 'Application not found',
-            code: 'APPLICATION_NOT_FOUND',
-          });
-        }
+/**
+ * Refresh Access Token
+ * Headers: X-Application-ID, X-Application-Secret
+ * Body: { refresh_token }
+ */
+router.post('/refresh-token',
+  authenticateApplication,
+  userAuthController.refreshToken.bind(userAuthController)
+);
 
-        const application = result.rows[0];
-        
-        // Extract roles from roles_config JSONB
-        let available_roles = [];
-        let default_user_role = 'user'; // Fallback default
-        
-        if (application.roles_config) {
-          try {
-            // Parse roles_config JSONB
-            const rolesConfig = typeof application.roles_config === 'string' 
-              ? JSON.parse(application.roles_config) 
-              : application.roles_config;
-            
-            if (Array.isArray(rolesConfig) && rolesConfig.length > 0) {
-              // Extract available role names
-              available_roles = rolesConfig.map(role => role.name).filter(Boolean);
-              
-              // Find the default role based on isDefault boolean
-              const defaultRoleByFlag = rolesConfig.find(role => role.isDefault === true);
-              
-              if (defaultRoleByFlag) {
-                // Use the role marked as isDefault
-                default_user_role = defaultRoleByFlag.name;
-              } else {
-                // If no isDefault found, use the role with lowest hierarchy
-                const sortedByHierarchy = [...rolesConfig].sort((a, b) => (a.hierarchy || 0) - (b.hierarchy || 0));
-                default_user_role = sortedByHierarchy[0].name;
-              }
-            }
-          } catch (error) {
-            console.warn('Failed to parse roles_config:', error);
-            // Keep default fallback values
-          }
-        }
+/**
+ * Verify Email
+ * Body: { token }
+ */
+router.post('/verify-email',
+  userAuthController.verifyEmail.bind(userAuthController)
+);
 
-        // Ensure we have at least some roles
-        if (available_roles.length === 0) {
-          available_roles = ['user'];
-        }
+/**
+ * Resend Verification Email
+ * Body: { user_id?, email? }
+ */
+router.post('/resend-verification',
+  userAuthController.resendVerificationEmail.bind(userAuthController)
+);
 
-        res.json({ 
-          application: {
-            id: application.id,
-            name: application.name,
-            description: application.description,
-            auth_mode: application.auth_mode,
-            main_page_url: application.main_page_url,
-            redirect_url: application.redirect_url,
-            available_roles: available_roles,
-            default_user_role: default_user_role,
-            is_active: application.is_active
-          }
-        });
-      } catch (error) {
-        logger.error('Get application info error:', error);
-        console.error('Full error details:', error);
-        res.status(500).json({
-          error: 'Failed to fetch application info',
-          details: error.message,
-          code: 'DATABASE_ERROR'
-        });
+/**
+ * Get Application Details (Public)
+ * This allows client apps to fetch their configuration
+ */
+router.get('/applications/:application_id', async (req, res) => {
+  try {
+    const { application_id } = req.params;
+
+    const query = `
+      SELECT 
+        ca.id,
+        ca.name,
+        ca.description,
+        ca.auth_mode,
+        ca.main_page_url,
+        ca.redirect_url,
+        ca.default_role,
+        ca.roles_config,
+        ca.is_active
+      FROM client_applications ca
+      JOIN clients c ON ca.client_id = c.id
+      WHERE ca.id = $1 AND ca.is_active = true AND c.is_active = true
+    `;
+
+    const result = await database.query(query, [application_id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        error: 'Application not found',
+        code: 'APPLICATION_NOT_FOUND'
+      });
+    }
+
+    const app = result.rows[0];
+
+    // Extract roles from JSONB
+    let roles = ['user'];
+    let defaultRole = 'user';
+
+    if (app.roles_config && Array.isArray(app.roles_config)) {
+      roles = app.roles_config.map(r => r.name);
+      const defaultRoleObj = app.roles_config.find(r => r.isDefault);
+      if (defaultRoleObj) defaultRole = defaultRoleObj.name;
+    }
+
+    res.json({
+      application: {
+        id: app.id,
+        name: app.name,
+        description: app.description,
+        auth_mode: app.auth_mode,
+        available_roles: roles,
+        default_role: defaultRole,
+        main_page_url: app.main_page_url,
+        redirect_url: app.redirect_url
       }
     });
 
-// Protected routes - require user authentication
-router.use(authenticateUser);
+  } catch (error) {
+    logger.error('Get application error:', error);
+    res.status(500).json({
+      error: 'Internal server error',
+      code: 'SERVER_ERROR'
+    });
+  }
+});
 
-router.get('/profile', userAuthController.getProfile.bind(userAuthController));
-router.post('/logout', userAuthController.logout.bind(userAuthController));
-router.post('/:user_id/request-role', userAuthController.requestRoleUpgrade.bind(userAuthController));
-router.get('/:user_id/role-requests', userAuthController.getRoleRequests.bind(userAuthController));
-router.put('/profile', userAuthController.updateProfile.bind(userAuthController));
+// ============================================================================
+// PROTECTED ROUTES - Require User Authentication
+// ============================================================================
+
+/**
+ * Get User Profile
+ * Requires: User JWT token
+ */
+router.get('/profile',
+  authenticateUser,
+  userAuthController.getProfile.bind(userAuthController)
+);
+
+/**
+ * Update User Profile
+ * Requires: User JWT token
+ * Body: { name }
+ */
+router.put('/profile',
+  authenticateUser,
+  userAuthController.updateProfile.bind(userAuthController)
+);
+
+/**
+ * User Logout
+ * Requires: User JWT token
+ * Body: { refresh_token? }
+ */
+router.post('/logout',
+  authenticateUser,
+  userAuthController.logout.bind(userAuthController)
+);
+
+/**
+ * Request Role Upgrade
+ * Requires: User JWT token
+ * Body: { requested_role }
+ */
+router.post('/:user_id/request-role',
+  authenticateUser,
+  userAuthController.requestRoleUpgrade.bind(userAuthController)
+);
+
+/**
+ * Get Role Requests
+ * Requires: User JWT token
+ */
+router.get('/:user_id/role-requests',
+  authenticateUser,
+  userAuthController.getRoleRequests.bind(userAuthController)
+);
 
 module.exports = router;

@@ -6,7 +6,7 @@ class ClientAuthService {
     this.refreshTokenKey = 'authjet_client_refresh_token';
     this.clientKey = 'authjet_client_user';
     this.baseURL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
-    
+
     // Create axios instance for client API
     this.api = axios.create({
       baseURL: this.baseURL,
@@ -37,7 +37,7 @@ class ClientAuthService {
 
         if (error.response?.status === 401 && !originalRequest._retry) {
           originalRequest._retry = true;
-          
+
           try {
             await this.refreshToken();
             const token = this.getToken();
@@ -103,13 +103,13 @@ class ClientAuthService {
         email,
         password
       });
-      
+
       if (response.data.access_token) {
         this.setToken(response.data.access_token);
         this.setRefreshToken(response.data.refresh_token);
         this.setClient(response.data.client);
       }
-      
+
       return response.data;
     } catch (error) {
       this.clearToken();
@@ -137,7 +137,7 @@ class ClientAuthService {
       const response = await this.api.post('/api/client/refresh-token', {
         refresh_token: refreshToken
       });
-      
+
       if (response.data.access_token) {
         this.setToken(response.data.access_token);
         if (response.data.refresh_token) {
@@ -145,7 +145,7 @@ class ClientAuthService {
         }
         return response.data.access_token;
       }
-      
+
       throw new Error('No access token in response');
     } catch (error) {
       this.clearToken();
@@ -222,6 +222,34 @@ class ClientAuthService {
   async regenerateApplicationSecret(applicationId) {
     try {
       const response = await this.api.post(`/api/client/applications/${applicationId}/regenerate-secret`);
+      return response.data;
+    } catch (error) {
+      throw this.handleError(error);
+    }
+  }
+
+  // Application Key management
+  async getApplicationKeys(applicationId) {
+    try {
+      const response = await this.api.get(`/api/client/applications/${applicationId}/keys`);
+      return response.data;
+    } catch (error) {
+      throw this.handleError(error);
+    }
+  }
+
+  async rotateApplicationKeys(applicationId) {
+    try {
+      const response = await this.api.post(`/api/client/applications/${applicationId}/keys/rotate`);
+      return response.data;
+    } catch (error) {
+      throw this.handleError(error);
+    }
+  }
+
+  async getApplicationJwks(applicationId) {
+    try {
+      const response = await this.api.get(`/api/client/applications/${applicationId}/jwks`);
       return response.data;
     } catch (error) {
       throw this.handleError(error);

@@ -25,7 +25,7 @@ api.interceptors.request.use(
 
     // Create a more specific request ID that includes params to avoid over-aggressive cancellation
     const requestId = `${config.method}-${config.url}-${JSON.stringify(config.params || {})}`;
-    
+
     // Only cancel if the exact same request (including params) is pending
     if (pendingRequests.has(requestId)) {
       const existingRequest = pendingRequests.get(requestId);
@@ -34,7 +34,7 @@ api.interceptors.request.use(
         existingRequest.cancel('Duplicate request cancelled');
       }
     }
-    
+
     const cancelSource = axios.CancelToken.source();
     config.cancelToken = cancelSource.token;
     pendingRequests.set(requestId, cancelSource);
@@ -85,12 +85,12 @@ const handleApiError = (error) => {
   if (axios.isCancel(error)) {
     throw error; // Let the calling code handle cancellation
   }
-  
+
   if (error.response) {
     // Server responded with error status
     const message = error.response.data?.error || error.response.data?.message || 'An error occurred';
     const code = error.response.data?.code || 'UNKNOWN_ERROR';
-    
+
     throw new Error(`${message} (${code})`);
   } else if (error.request) {
     // Request made but no response received
@@ -103,114 +103,135 @@ const handleApiError = (error) => {
 
 // API methods
 const apiServiceObj = {
-  // Auth endpoints
+  // Auth endpoints (End-Users)
   auth: {
-    login: (email, password) =>
-      api.post('/api/auth/login', { 
-        email, 
-        password,
-        client_id: APP_CONFIG.DEFAULT_CLIENT_ID 
+    login: (email, password, applicationId) => {
+      // Use provided appId or default
+      const appId = applicationId || APP_CONFIG.DEFAULT_APPLICATION_ID;
+
+      return api.post('/api/user/login', {
+        email,
+        password
+      }, {
+        headers: {
+          'X-Application-ID': appId
+        }
       })
         .then(response => response.data)
-        .catch(handleApiError),
-    
-    register: (email, password) =>
-      api.post('/api/auth/register', { 
-        email, 
-        password,
-        client_id: APP_CONFIG.DEFAULT_CLIENT_ID 
+        .catch(handleApiError);
+    },
+
+    register: (email, password, applicationId) => {
+      const appId = applicationId || APP_CONFIG.DEFAULT_APPLICATION_ID;
+
+      return api.post('/api/user/register', {
+        email,
+        password
+      }, {
+        headers: {
+          'X-Application-ID': appId
+        }
       })
         .then(response => response.data)
-        .catch(handleApiError),
-    
+        .catch(handleApiError);
+    },
+
     logout: (payload) =>
-      api.post('/api/auth/logout', payload)
+      api.post('/api/user/logout', payload)
         .then(response => response.data)
         .catch(handleApiError),
-    
-    refreshToken: (payload) =>
-      api.post('/api/auth/refresh', payload)
+
+    refreshToken: (payload, applicationId) => {
+      const appId = applicationId || APP_CONFIG.DEFAULT_APPLICATION_ID;
+
+      return api.post('/api/user/refresh-token', payload, {
+        headers: {
+          'X-Application-ID': appId
+        }
+      })
         .then(response => response.data)
-        .catch(handleApiError),
-    
+        .catch(handleApiError);
+    },
+
     verifyToken: (token) =>
-      api.post('/api/auth/verify', { token })
-        .then(response => response.data)
-        .catch(handleApiError),
-    
+      // Use profile to verify token validity since we don't have a dedicated verify endpoint
+      api.get('/api/user/profile')
+        .then(() => ({ valid: true }))
+        .catch(() => ({ valid: false })),
+
     getCurrentUser: () =>
-      api.get('/api/auth/me')
+      api.get('/api/user/profile')
         .then(response => response.data)
         .catch(handleApiError),
-    
+
     changePassword: (passwordData) =>
-      api.post('/api/auth/change-password', passwordData)
+      api.post('/api/user/change-password', passwordData) // Note: Need to implement this if missing
         .then(response => response.data)
         .catch(handleApiError),
   },
 
-  // Client endpoints
+  // Client endpoints (For Admin Dashboard)
   clients: {
     list: (params = {}) =>
-      api.get('/api/clients', { params })
+      api.get('/api/admin/clients', { params })
         .then(response => response.data)
         .catch(handleApiError),
-    
+
     get: (id) =>
-      api.get(`/api/clients/${id}`)
+      api.get(`/api/admin/clients/${id}`)
         .then(response => response.data)
         .catch(handleApiError),
-    
+
     create: (clientData) =>
-      api.post('/api/clients', clientData)
+      api.post('/api/admin/clients', clientData) // Note: Admin creates clients?
         .then(response => response.data)
         .catch(handleApiError),
-    
+
     update: (id, clientData) =>
-      api.put(`/api/clients/${id}`, clientData)
+      api.put(`/api/admin/clients/${id}`, clientData)
         .then(response => response.data)
         .catch(handleApiError),
-    
+
     delete: (id) =>
-      api.delete(`/api/clients/${id}`)
+      api.delete(`/api/admin/clients/${id}`)
         .then(response => response.data)
         .catch(handleApiError),
-    
+
     regenerateApiKey: (id) =>
-      api.post(`/api/clients/${id}/regenerate-key`)
+      api.post(`/api/admin/clients/${id}/regenerate-key`)
         .then(response => response.data)
         .catch(handleApiError),
-    
+
     getStats: (id) =>
-      api.get(`/api/clients/${id}/stats`)
+      api.get(`/api/admin/clients/${id}/stats`)
         .then(response => response.data)
         .catch(handleApiError),
   },
 
-  // User endpoints (end-users of client apps)
+  // User endpoints (Admin managing users of a client)
   users: {
     list: (clientId, params = {}) =>
-      api.get(`/api/users/${clientId}/users`, { params })
+      api.get(`/api/admin/clients/${clientId}/users`, { params })
         .then(response => response.data)
         .catch(handleApiError),
-    
+
     get: (clientId, userId) =>
-      api.get(`/api/users/${clientId}/users/${userId}`)
+      api.get(`/api/admin/clients/${clientId}/users/${userId}`)
         .then(response => response.data)
         .catch(handleApiError),
-    
+
     update: (clientId, userId, userData) =>
-      api.put(`/api/users/${clientId}/users/${userId}`, userData)
+      api.put(`/api/admin/clients/${clientId}/users/${userId}`, userData)
         .then(response => response.data)
         .catch(handleApiError),
-    
+
     getSessions: (clientId, userId) =>
-      api.get(`/api/users/${clientId}/users/${userId}/sessions`)
+      api.get(`/api/admin/clients/${clientId}/users/${userId}/sessions`)
         .then(response => response.data)
         .catch(handleApiError),
-    
+
     revokeSession: (clientId, userId, sessionId) =>
-      api.delete(`/api/users/${clientId}/users/${userId}/sessions/${sessionId}`)
+      api.delete(`/api/admin/clients/${clientId}/users/${userId}/sessions/${sessionId}`)
         .then(response => response.data)
         .catch(handleApiError),
   },
@@ -218,12 +239,12 @@ const apiServiceObj = {
   // Webhook endpoints
   webhooks: {
     test: (clientId, webhookData) =>
-      api.post(`/api/webhooks/${clientId}/test`, webhookData)
+      api.post(`/api/admin/clients/${clientId}/webhooks/test`, webhookData)
         .then(response => response.data)
         .catch(handleApiError),
-    
+
     getLogs: (clientId, params = {}) =>
-      api.get(`/api/webhooks/${clientId}/logs`, { params })
+      api.get(`/api/admin/clients/${clientId}/webhooks/logs`, { params })
         .then(response => response.data)
         .catch(handleApiError),
   },
@@ -231,16 +252,16 @@ const apiServiceObj = {
   // Analytics endpoints
   analytics: {
     getDashboardStats: () =>
-      api.get('/api/analytics/dashboard')
+      api.get('/api/admin/dashboard/stats')
         .then(response => response.data)
         .catch(handleApiError),
-    
+
     getClientStats: (clientId, period = '30d') =>
-      api.get(`/api/analytics/clients/${clientId}`, { params: { period } })
+      api.get(`/api/admin/clients/${clientId}/stats`, { params: { period } }) // Helper if stats route exists?
         .then(response => response.data)
         .catch(handleApiError),
     getLoginTrends: (clientId, period = '30d') =>
-      api.get(`/api/analytics/clients/${clientId}/logins`, { params: { period } })
+      api.get(`/api/admin/clients/${clientId}/analytics/logins`, { params: { period } })
         .then(response => response.data)
         .catch(handleApiError),
   },

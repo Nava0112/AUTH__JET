@@ -2,305 +2,340 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const database = require('../utils/database');
 const logger = require('../utils/logger');
-const ClientKeyService = require('./clientKey.service');
+const ApplicationKeyService = require('./applicationKey.service');
+const database = require('../utils/database');
+const logger = require('../utils/logger');
+const crypto = require('crypto');
 
 /**
- * User JWT Service using CLIENT-SPECIFIC RSA keys
- * Each client has their own RSA key pair in client_keys table
- * User tokens are signed with the client's private key
- * Client applications verify tokens with their public key from JWKS endpoint
+ * User JWT Service
+ * 
+ * Handles JWT operations for end users of client applications.
+ * UPDATED: Now uses ApplicationKeyService for application-level keys.
  */
-class UserJWTService {
+class UserJwtService {
   constructor() {
-    this.algorithm = 'RS256';
-    this.accessTokenExpiry = process.env.NODE_ENV === 'production' ? '1h' : '15m';
-    this.refreshTokenExpiryMs = 7 * 24 * 60 * 60 * 1000; // 7 days
-    this.issuer = 'authjet-saas';
-    this.audience = 'client-app-users';
+    this.accessTokenExpiry = 15 * 60; // 15 minutes
+    this.refreshTokenExpiry = 7 * 24 * 60 * 60; // 7 days
   }
 
   /**
-   * Generate access token signed with CLIENT'S private key
+   * Generate access token for a user
+   * FIXED: Uses application's key, not client's key
+   * 
+   * @param {number} userId - User database ID
+   * @param {number} applicationId - Application ID (not client ID!)
+   * @param {Object} additionalClaims - Extra claims to include
+   * @returns {string} Signed JWT
    */
-  async generateAccessToken(user, clientId, applicationId) {
+  async generateAccessToken(userId, applicationId, additionalClaims = {}) {
     try {
-      // Get client's active key
-      const key = await ClientKeyService.getActiveKey(clientId);
-      
-      if (!key || !key.private_key) {
-        throw new Error(`No active RSA key found for client ${clientId}. Client must generate keys first.`);
-      }
-
-      const tokenPayload = {
-        sub: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        client_id: clientId,
+      const payload = {
+        sub: userId.toString(),
+        type: 'user',
         application_id: applicationId,
-        iss: this.issuer,
-        aud: this.audience,
         iat: Math.floor(Date.now() / 1000),
+        ...additionalClaims
       };
 
-      return new Promise((resolve, reject) => {
-        jwt.sign(
-          tokenPayload, 
-          key.private_key, 
-          { 
-            algorithm: this.algorithm,
-            expiresIn: this.accessTokenExpiry,
-            keyid: key.kid // Include key ID in JWT header
-          }, 
-          (err, token) => {
-            if (err) {
-              logger.error('Failed to generate client-specific access token:', err);
-              reject(err);
-            } else {
-              logger.info('Access token generated with client key', { 
-                clientId, 
-                applicationId, 
-                userId: user.id,
-                kid: key.kid 
-              });
-              resolve(token);
-            }
-          }
-        );
+      // Sign with APPLICATION's key (not client's key!)
+      const token = await ApplicationKeyService.signJwt(applicationId, payload);
+
+      logger.debug('User access token generated', {
+        userId,
+        applicationId,
+        expiresIn: this.accessTokenExpiry
       });
+
+      return token;
+
     } catch (error) {
-      logger.error('Failed to generate client-specific access token:', error);
+      logger.error('Failed to generate user access token:', error);
       throw error;
     }
   }
 
   /**
-   * TEMPORARY FIX: Bypass ClientKeyService encryption issues
+   * Verify access token
+   * FIXED: Uses application's public key
+   * 
+   * @param {string} token - JWT to verify
+   * @param {number} applicationId - Application ID
+   * @returns {Object} Decoded token payload
    */
-  async generateAccessTokenWithFallback(user, clientId, applicationId) {
+  async verifyAccessToken(token, applicationId) {
     try {
-      // First try the normal way with client-specific keys
-      return await this.generateAccessToken(user, clientId, applicationId);
-    } catch (error) {
-      console.log('⚠️ ClientKeyService failed, using fallback JWT...');
-      
-      // Fallback: Use simple JWT without client-specific keys
-      const tokenPayload = {
-        sub: user.id,
-        email: user.email,
-        name: user.name,
-        client_id: clientId,
-        application_id: applicationId,
-        role: user.role,
-        iat: Math.floor(Date.now() / 1000),
-      };
+      const decoded = await ApplicationKeyService.verifyJwt(applicationId, token);
 
-      // Use a simple secret for fallback
-      const fallbackSecret = process.env.JWT_FALLBACK_SECRET || 'fallback-secret-change-in-production';
-      
-      return jwt.sign(tokenPayload, fallbackSecret, { 
-        algorithm: 'HS256',
-        expiresIn: '15m'
+      logger.debug('User access token verified', {
+        userId: decoded.sub,
+        applicationId: decoded.application_id
       });
+
+      return decoded;
+
+    } catch (error) {
+      logger.warn('User access token verification failed:', error.message);
+      throw error;
     }
   }
 
   /**
-   * Generate refresh token and store in database
+   * Generate refresh token for a user
+   * FIXED: Uses polymorphic sessions table
+   * 
+   * @param {number} userId - User database ID
+   * @param {number} applicationId - Application ID
+   * @param {string} ipAddress - User's IP address
+   * @returns {string} Refresh token
    */
-  async generateRefreshToken(userId, clientId, applicationId) {
+  async generateRefreshToken(userId, applicationId, ipAddress) {
     try {
+      // Generate random refresh token
       const refreshToken = crypto.randomBytes(40).toString('hex');
-      const expiresAt = new Date(Date.now() + this.refreshTokenExpiryMs);
+      const hashedToken = crypto
+        .createHash('sha256')
+        .update(refreshToken)
+        .digest('hex');
 
-      // Convert custom client_id string to database client ID
-      const clientDbId = await ClientKeyService.getClientDbId(clientId);
+      const expiresAt = new Date(Date.now() + this.refreshTokenExpiry * 1000);
 
-      // Store refresh token in database
+      // Store in polymorphic sessions table
       const query = `
-        INSERT INTO user_sessions (
-          user_id, client_id, application_id, refresh_token,
-          expires_at, use_count
-        )
-        VALUES ($1, $2, $3, $4, $5, $6)
+        INSERT INTO sessions (
+          session_type, entity_id, refresh_token, expires_at, ip_address
+        ) VALUES ($1, $2, $3, $4, $5)
         RETURNING id
       `;
-      
+
       await database.query(query, [
-        userId, 
-        clientDbId,
-        applicationId, 
-        refreshToken,
+        'user',           // session_type
+        userId,           // entity_id
+        hashedToken,      // hashed refresh token
         expiresAt,
-        0 // Initial use count
+        ipAddress
       ]);
 
-      logger.info('Refresh token generated', { userId, clientId, applicationId });
-
-      return refreshToken;
-    } catch (error) {
-      logger.error('Failed to generate refresh token:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Verify token with CLIENT'S public key
-   */
-  async verifyToken(token, clientId) {
-    try {
-      // Get client's active key
-      const key = await ClientKeyService.getActiveKey(clientId);
-      
-      if (!key) {
-        throw new Error(`No active key found for client ${clientId}`);
-      }
-
-      return new Promise((resolve, reject) => {
-        jwt.verify(
-          token, 
-          key.public_key, 
-          { 
-            algorithms: [this.algorithm],
-            issuer: this.issuer
-          }, 
-          (err, decoded) => {
-            if (err) {
-              logger.warn('Token verification failed:', err.message);
-              reject(err);
-            } else {
-              resolve(decoded);
-            }
-          }
-        );
+      logger.debug('User refresh token generated', {
+        userId,
+        applicationId,
+        expiresAt
       });
+
+      return refreshToken; // Return unhashed token to client
+
     } catch (error) {
-      logger.error('Failed to verify token:', error);
+      logger.error('Refresh token generation error:', error);
       throw error;
     }
   }
 
   /**
-   * Refresh tokens - generates new access and refresh tokens
+   * Refresh tokens using a refresh token
+   * FIXED: Uses polymorphic sessions and application keys
+   * 
+   * @param {string} refreshToken - The refresh token
+   * @param {number} applicationId - Application ID
+   * @returns {Object} New tokens
    */
-  async refreshTokens(refreshToken) {
+  async refreshTokens(refreshToken, applicationId) {
     try {
-      // Find and validate refresh token
+      const hashedToken = crypto
+        .createHash('sha256')
+        .update(refreshToken)
+        .digest('hex');
+
+      // Look up session in polymorphic table
       const query = `
-        SELECT us.*, u.email, u.name, u.role, u.is_active, c.client_id as custom_client_id
-        FROM user_sessions us
-        JOIN users u ON us.user_id = u.id
-        JOIN clients c ON us.client_id = c.id
-        WHERE us.refresh_token = $1 AND us.expires_at > NOW() AND us.revoked = false AND u.is_active = true
+        SELECT 
+          s.*,
+          u.email,
+          u.role,
+          u.email_verified,
+          u.is_active,
+          u.application_id
+        FROM sessions s
+        JOIN users u ON s.entity_id = u.id
+        WHERE s.refresh_token = $1 
+          AND s.session_type = 'user'
+          AND s.expires_at > NOW() 
+          AND (s.revoked = false OR s.revoked IS NULL)
+          AND u.application_id = $2
       `;
 
-      const result = await database.query(query, [refreshToken]);
-      
+      const result = await database.query(query, [hashedToken, applicationId]);
+
       if (result.rows.length === 0) {
         throw new Error('Invalid or expired refresh token');
       }
 
       const session = result.rows[0];
-      
-      // Check use count - allow up to 3 uses
-      if (session.use_count >= 3) {
-        await this.revokeRefreshToken(refreshToken);
-        throw new Error('Refresh token exceeded maximum uses');
+      const userId = session.entity_id;
+
+      // Verify user is still active
+      if (!session.is_active) {
+        throw new Error('User account is inactive');
       }
 
-      // Generate new tokens with CLIENT-SPECIFIC keys
-      const user = {
-        id: session.user_id,
-        email: session.email,
-        name: session.name,
-        role: session.role
-      };
-
-      const newAccessToken = await this.generateAccessTokenWithFallback(
-        user,
-        session.custom_client_id,
-        session.application_id
+      // Generate new access token
+      const newAccessToken = await this.generateAccessToken(
+        userId,
+        applicationId,
+        {
+          email: session.email,
+          role: session.role,
+          email_verified: session.email_verified
+        }
       );
 
+      // Generate new refresh token
       const newRefreshToken = await this.generateRefreshToken(
-        session.user_id,
-        session.custom_client_id,
-        session.application_id
+        userId,
+        applicationId,
+        session.ip_address
       );
 
-      // Increment use count of old token
-      await database.query(
-        'UPDATE user_sessions SET use_count = use_count + 1 WHERE refresh_token = $1',
-        [refreshToken]
-      );
+      // Revoke old refresh token
+      await this.revokeRefreshToken(hashedToken);
 
-      logger.info('Tokens refreshed successfully', { 
-        userId: session.user_id, 
-        clientId: session.custom_client_id 
+      logger.info('Tokens refreshed', {
+        userId,
+        applicationId
       });
 
       return {
         access_token: newAccessToken,
         refresh_token: newRefreshToken,
         token_type: 'Bearer',
-        expires_in: process.env.NODE_ENV === 'production' ? 3600 : 900,
+        expires_in: this.accessTokenExpiry
       };
+
     } catch (error) {
-      logger.error('Failed to refresh tokens:', error);
+      logger.error('Token refresh error:', error);
       throw error;
     }
   }
 
   /**
-   * Revoke a specific refresh token
+   * Revoke a refresh token
+   * 
+   * @param {string} tokenHash - Hashed refresh token
    */
-  async revokeRefreshToken(refreshToken) {
-    const query = `
-      UPDATE user_sessions 
-      SET revoked = true, revoked_at = NOW() 
-      WHERE refresh_token = $1
-    `;
-    
-    await database.query(query, [refreshToken]);
-    logger.info('Refresh token revoked', { refreshToken: refreshToken.substring(0, 8) + '...' });
+  async revokeRefreshToken(tokenHash) {
+    try {
+      const query = `
+        UPDATE sessions 
+        SET revoked = true, revoked_at = NOW() 
+        WHERE refresh_token = $1 AND session_type = 'user'
+      `;
+
+      await database.query(query, [tokenHash]);
+
+      logger.debug('Refresh token revoked', {
+        tokenHash: tokenHash.substring(0, 16) + '...'
+      });
+
+    } catch (error) {
+      logger.error('Revoke refresh token error:', error);
+      throw error;
+    }
   }
 
   /**
    * Revoke all sessions for a user
+   * 
+   * @param {number} userId - User database ID
    */
-  async revokeAllUserSessions(userId, clientId, applicationId) {
-    // Convert custom client_id to database ID
-    const clientDbId = await ClientKeyService.getClientDbId(clientId);
+  async revokeAllUserSessions(userId) {
+    try {
+      const query = `
+        UPDATE sessions 
+        SET revoked = true, revoked_at = NOW() 
+        WHERE entity_id = $1 
+          AND session_type = 'user'
+          AND (revoked = false OR revoked IS NULL)
+      `;
 
-    const query = `
-      UPDATE user_sessions 
-      SET revoked = true, revoked_at = NOW() 
-      WHERE user_id = $1 AND client_id = $2 AND application_id = $3 AND revoked = false
-    `;
-    
-    await database.query(query, [userId, clientDbId, applicationId]);
-    logger.info('All user sessions revoked', { userId, clientId, applicationId });
+      const result = await database.query(query, [userId]);
+
+      logger.info('All user sessions revoked', {
+        userId,
+        count: result.rowCount
+      });
+
+      return { revoked: result.rowCount };
+
+    } catch (error) {
+      logger.error('Revoke all user sessions error:', error);
+      throw error;
+    }
   }
 
   /**
-   * Generate token pair (access + refresh) for a user
+   * Get active sessions for a user
+   * 
+   * @param {number} userId - User database ID
+   * @returns {Array} Active sessions
    */
-  async generateTokenPair(user, clientId, applicationId) {
+  async getActiveSessions(userId) {
     try {
-      const accessToken = await this.generateAccessTokenWithFallback(user, clientId, applicationId);
-      const refreshToken = await this.generateRefreshToken(user.id, clientId, applicationId);
+      const query = `
+        SELECT 
+          id,
+          ip_address,
+          user_agent,
+          created_at,
+          expires_at
+        FROM sessions 
+        WHERE entity_id = $1 
+          AND session_type = 'user'
+          AND (revoked = false OR revoked IS NULL) 
+          AND expires_at > NOW()
+        ORDER BY created_at DESC
+      `;
 
-      return {
-        access_token: accessToken,
-        refresh_token: refreshToken,
-        token_type: 'Bearer',
-        expires_in: process.env.NODE_ENV === 'production' ? 3600 : 900,
-      };
+      const result = await database.query(query, [userId]);
+
+      return result.rows;
+
     } catch (error) {
-      logger.error('Failed to generate token pair:', error);
+      logger.error('Get active sessions error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Revoke a specific session
+   * 
+   * @param {number} sessionId - Session database ID
+   * @param {number} userId - User ID (for verification)
+   */
+  async revokeSession(sessionId, userId) {
+    try {
+      const query = `
+        UPDATE sessions 
+        SET revoked = true, revoked_at = NOW() 
+        WHERE id = $1 
+          AND entity_id = $2 
+          AND session_type = 'user'
+      `;
+
+      const result = await database.query(query, [sessionId, userId]);
+
+      if (result.rowCount === 0) {
+        throw new Error('Session not found or already revoked');
+      }
+
+      logger.info('Session revoked', { sessionId, userId });
+
+    } catch (error) {
+      logger.error('Revoke session error:', error);
       throw error;
     }
   }
 }
 
-module.exports = new UserJWTService();
+module.exports = new UserJwtService();
+
+
+module.exports = new UserJwtService();
