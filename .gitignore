@@ -51,6 +51,7 @@ keys/*.pem
 keys/*.key
 *.node_modules
 *.tsbuildinfo
-*md
-
+*.md
 backend/reports/
+/tests
+backend/test/

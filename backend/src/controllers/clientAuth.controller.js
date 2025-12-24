@@ -3,19 +3,21 @@ const database = require('../utils/database');
 const logger = require('../utils/logger');
 const jwtService = require('../services/jwt.service');
 const emailService = require('../services/email.service');
+const ClientKeyService = require('../services/clientKey.service');
+const ApplicationKeyService = require('../services/applicationKey.service');
 
 class ClientAuthController {
   async register(req, res, next) {
-    const { 
+    const {
       name, email, password, company_name, website, phone,
       plan_type = 'free'
     } = req.body;
-    
+
     try {
       // Check if client already exists
       const existingQuery = 'SELECT id FROM clients WHERE email = $1';
       const existing = await database.query(existingQuery, [email]);
-      
+
       if (existing.rows.length > 0) {
         return res.status(409).json({
           error: 'Client with this email already exists',
@@ -38,7 +40,7 @@ class ClientAuthController {
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         RETURNING id, name, email, company_name, plan_type, created_at
       `;
-      
+
       const result = await database.query(insertQuery, [
         name, email, passwordHash, company_name, website, phone,
         plan_type, apiKey, secretKeyHash, true, false
@@ -51,6 +53,18 @@ class ClientAuthController {
         await emailService.sendClientWelcomeEmail(email, name, client.id);
       } catch (emailError) {
         logger.error('Failed to send welcome email:', emailError);
+      }
+
+      // Auto-generate RSA key pair for this client (new requirement)
+      let keyPair = null;
+      try {
+        keyPair = await ClientKeyService.generateKeyPair(client.id);
+        logger.info('RSA key pair auto-generated for new client', {
+          clientId: client.id,
+          keyId: keyPair.keyId
+        });
+      } catch (keyError) {
+        logger.error('Failed to auto-generate RSA keys for client:', keyError);
       }
 
       logger.info('Client registered successfully', { clientId: client.id, email });
@@ -68,6 +82,10 @@ class ClientAuthController {
           api_key: apiKey,
           secret_key: secretKey, // Only shown once
         },
+        keys: keyPair ? {
+          keyId: keyPair.keyId,
+          kid: keyPair.kid,
+        } : null,
         message: 'Client registered successfully. Please verify your email and save your API credentials.',
       });
 
@@ -79,7 +97,7 @@ class ClientAuthController {
 
   async login(req, res, next) {
     const { email, password } = req.body;
-    
+
     try {
       // Find client
       const clientQuery = `
@@ -88,7 +106,7 @@ class ClientAuthController {
         FROM clients 
         WHERE email = $1
       `;
-      
+
       const result = await database.query(clientQuery, [email]);
 
       if (result.rows.length === 0) {
@@ -109,7 +127,7 @@ class ClientAuthController {
 
       // Verify password
       const isValidPassword = await crypto.comparePassword(password, client.password_hash);
-      
+
       if (!isValidPassword) {
         return res.status(401).json({
           error: 'Invalid credentials',
@@ -118,61 +136,62 @@ class ClientAuthController {
       }
 
       // Generate tokens
-      // Generate tokens
-    const accessToken = await jwtService.generateAccessToken({
-      sub: client.id,
-      email: client.email,
-      type: 'client'
-    });
-
-    // Create session with correct column names
-    const sessionQuery = `
-      INSERT INTO sessions (
-        client_id, session_type, refresh_token,
-        expires_at, ip_address
-      )
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING id
-    `;
-
-    const expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000); // 2 hours
-
-    await database.query(sessionQuery, [
-      client.id,
-      'client',
-      accessToken, // Store access token as refresh_token (temporary fix)
-      expiresAt,
-      req.ip
-    ]);
-
-    // Update last login
-    await database.query(
-      'UPDATE clients SET last_login = NOW() WHERE id = $1',
-      [client.id]
-    );
-
-    logger.info('Client login successful', { clientId: client.id, email });
-    // Add debug logging
-    console.log('=== BACKEND LOGIN DEBUG ===');
-    console.log('Access token generated:', accessToken);
-    console.log('Access token type:', typeof accessToken);
-    console.log('Access token length:', accessToken?.length);
-    console.log('Client ID:', client.id);
-
-    res.json({
-      access_token: accessToken,
-      refresh_token: accessToken,
-      token_type: 'Bearer',
-      expires_in: 7200,
-      client: {
-        id: client.id,
+      const accessToken = await jwtService.generateAccessToken({
+        sub: client.id,
         email: client.email,
-        name: client.name,
-        company_name: client.company_name,
-        plan_type: client.plan_type,
-        email_verified: client.email_verified,
-      },
-    });
+        type: 'client'
+      });
+
+      const refreshToken = crypto.randomString(64);
+
+      // Create session with correct column names (polymorphic)
+      const sessionQuery = `
+        INSERT INTO sessions (
+          session_type, entity_id, refresh_token,
+          expires_at, ip_address
+        )
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING id
+      `;
+
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days for refresh token
+
+      await database.query(sessionQuery, [
+        'client',
+        client.id,
+        refreshToken,
+        expiresAt,
+        req.ip
+      ]);
+
+      // Update last login
+      await database.query(
+        'UPDATE clients SET last_login = NOW() WHERE id = $1',
+        [client.id]
+      );
+
+      logger.info('Client login successful', { clientId: client.id, email });
+      // Add debug logging
+      console.log('=== BACKEND LOGIN DEBUG ===');
+      console.log('Access token generated:', accessToken);
+      console.log('Access token type:', typeof accessToken);
+      console.log('Access token length:', accessToken?.length);
+      console.log('Client ID:', client.id);
+
+      res.json({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+        token_type: 'Bearer',
+        expires_in: 7200,
+        client: {
+          id: client.id,
+          email: client.email,
+          name: client.name,
+          company_name: client.company_name,
+          plan_type: client.plan_type,
+          email_verified: client.email_verified,
+        },
+      });
 
 
     } catch (error) {
@@ -191,9 +210,9 @@ class ClientAuthController {
         FROM clients 
         WHERE id = $1
       `;
-      
+
       const result = await database.query(clientQuery, [req.client.id]);
-      
+
       if (result.rows.length === 0) {
         return res.status(404).json({
           error: 'Client not found',
@@ -243,7 +262,7 @@ class ClientAuthController {
       };
 
       const stats = {};
-      
+
       for (const [key, query] of Object.entries(statsQueries)) {
         const result = await database.query(query, [clientId]);
         stats[key] = result.rows[0];
@@ -304,46 +323,65 @@ class ClientAuthController {
   }
 
   async createApplication(req, res, next) {
-    const { 
-      name, description, auth_type = 'basic', 
+    const {
+      name, description, auth_mode = 'basic',
       allowed_domains = [], redirect_urls = [],
-      default_user_role = 'user'
+      webhook_url, role_request_webhook,
+      roles, default_role_id
     } = req.body;
-    
+
     try {
       // Generate application credentials
-      const clientIdKey = 'app_' + crypto.randomString(16);
+      const clientAuthKey = 'app_' + crypto.randomString(16);
       const clientSecret = crypto.randomString(32);
       const clientSecretHash = await crypto.hashPassword(clientSecret);
 
-      // Set available roles based on auth type
-      const availableRoles = auth_type === 'basic' 
-        ? ['user', 'admin'] 
-        : ['user', 'admin']; // Can be customized later for advanced auth
+      // Process roles logic (from simple controller)
+      let processedRoles = [];
+      let defaultRole = 'user';
+
+      if (auth_mode === 'advanced' && roles && Array.isArray(roles)) {
+        processedRoles = roles.filter(role => role.name && role.displayName);
+
+        // Find default role
+        const defaultRoleObj = processedRoles.find(role => role.id === default_role_id);
+        if (defaultRoleObj) {
+          defaultRole = defaultRoleObj.name;
+        }
+      } else {
+        // Basic auth mode - use simple roles
+        processedRoles = [
+          { name: 'user', displayName: 'User', hierarchy: 1 },
+          { name: 'admin', displayName: 'Admin', hierarchy: 2 }
+        ];
+        defaultRole = 'user';
+      }
 
       const insertQuery = `
         INSERT INTO client_applications (
-          client_id, name, description, auth_type, allowed_domains, 
+          client_id, name, description, auth_mode, allowed_domains, 
           redirect_urls, client_id_key, client_secret_hash, 
-          default_user_role, available_roles, is_active
+          default_role, roles_config, webhook_url, role_request_webhook, is_active
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         RETURNING *
       `;
-      
+
       const result = await database.query(insertQuery, [
-        req.client.id, name, description, auth_type,
+        req.client.id, name, description, auth_mode,
         JSON.stringify(allowed_domains), JSON.stringify(redirect_urls),
-        clientIdKey, clientSecretHash, default_user_role,
-        JSON.stringify(availableRoles), true
+        clientAuthKey, clientSecretHash,
+        defaultRole, JSON.stringify(processedRoles),
+        webhook_url, role_request_webhook,
+        true
       ]);
 
       const application = result.rows[0];
 
-      logger.info('Application created', { 
-        applicationId: application.id, 
+      logger.info('Application created', {
+        applicationId: application.id,
         clientId: req.client.id,
-        name 
+        name
       });
 
       res.status(201).json({
@@ -375,7 +413,7 @@ class ClientAuthController {
         WHERE ca.id = $1 AND ca.client_id = $2
         GROUP BY ca.id
       `;
-      
+
       const result = await database.query(query, [id, req.client.id]);
 
       if (result.rows.length === 0) {
@@ -402,7 +440,7 @@ class ClientAuthController {
         'name', 'description', 'allowed_domains', 'redirect_urls',
         'default_user_role', 'available_roles', 'custom_roles', 'settings'
       ];
-      
+
       const updateFields = [];
       const updateValues = [];
       let paramCount = 0;
@@ -411,7 +449,7 @@ class ClientAuthController {
         if (updates[field] !== undefined) {
           paramCount++;
           updateFields.push(`${field} = $${paramCount}`);
-          
+
           if (['allowed_domains', 'redirect_urls', 'available_roles', 'custom_roles', 'settings'].includes(field)) {
             updateValues.push(JSON.stringify(updates[field]));
           } else {
@@ -430,7 +468,7 @@ class ClientAuthController {
       paramCount++;
       updateFields.push('updated_at = NOW()');
       updateValues.push(id);
-      
+
       paramCount++;
       updateValues.push(req.client.id);
 
@@ -450,9 +488,9 @@ class ClientAuthController {
         });
       }
 
-      logger.info('Application updated', { 
-        applicationId: id, 
-        clientId: req.client.id 
+      logger.info('Application updated', {
+        applicationId: id,
+        clientId: req.client.id
       });
 
       res.json({ application: result.rows[0] });
@@ -472,7 +510,7 @@ class ClientAuthController {
         SELECT COUNT(*) as count FROM users WHERE application_id = $1
       `;
       const userCount = await database.query(userCountQuery, [id]);
-      
+
       if (parseInt(userCount.rows[0].count) > 0) {
         return res.status(400).json({
           error: 'Cannot delete application with existing users',
@@ -495,8 +533,8 @@ class ClientAuthController {
         });
       }
 
-      logger.info('Application deleted', { 
-        applicationId: id, 
+      logger.info('Application deleted', {
+        applicationId: id,
         clientId: req.client.id,
         name: result.rows[0].name
       });
@@ -532,9 +570,9 @@ class ClientAuthController {
         });
       }
 
-      logger.info('Application secret regenerated', { 
-        applicationId: id, 
-        clientId: req.client.id 
+      logger.info('Application secret regenerated', {
+        applicationId: id,
+        clientId: req.client.id
       });
 
       res.json({
@@ -557,7 +595,7 @@ class ClientAuthController {
     try {
       // Revoke current session
       await database.query(
-        'UPDATE sessions SET revoked = true, revoked_at = NOW() WHERE client_id = $1 AND session_type = $2',
+        'UPDATE sessions SET revoked = true, revoked_at = NOW() WHERE entity_id = $1 AND session_type = $2',
         [req.client.id, 'client']
       );
 
@@ -567,6 +605,76 @@ class ClientAuthController {
 
     } catch (error) {
       logger.error('Client logout error:', error);
+      next(error);
+    }
+  }
+
+  async getApplicationKeys(req, res, next) {
+    try {
+      const { id: application_id } = req.params;
+
+      // Verify application belongs to client
+      const appResult = await database.query(
+        'SELECT id FROM client_applications WHERE id = $1 AND client_id = $2',
+        [application_id, req.client.id]
+      );
+
+      if (appResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Application not found' });
+      }
+
+      const keys = await ApplicationKeyService.getApplicationKeys(application_id);
+      res.json({ success: true, keys });
+    } catch (error) {
+      logger.error('Get application keys error:', error);
+      next(error);
+    }
+  }
+
+  async rotateApplicationKeys(req, res, next) {
+    try {
+      const { id: application_id } = req.params;
+
+      // Verify application belongs to client
+      const appResult = await database.query(
+        'SELECT id FROM client_applications WHERE id = $1 AND client_id = $2',
+        [application_id, req.client.id]
+      );
+
+      if (appResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Application not found' });
+      }
+
+      const newKey = await ApplicationKeyService.rotateKeys(application_id);
+      res.json({
+        success: true,
+        message: 'Key pair rotated successfully',
+        key: newKey
+      });
+    } catch (error) {
+      logger.error('Rotate application keys error:', error);
+      next(error);
+    }
+  }
+
+  async getApplicationJwks(req, res, next) {
+    try {
+      const { id: application_id } = req.params;
+
+      // Verify application belongs to client
+      const appResult = await database.query(
+        'SELECT id FROM client_applications WHERE id = $1 AND client_id = $2',
+        [application_id, req.client.id]
+      );
+
+      if (appResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Application not found' });
+      }
+
+      const keys = await ApplicationKeyService.getPublicJwk(application_id);
+      res.json({ keys });
+    } catch (error) {
+      logger.error('Get application JWKS error:', error);
       next(error);
     }
   }

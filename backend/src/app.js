@@ -12,9 +12,6 @@ const errorHandler = require('./middleware/errorHandler');
 const oauthService = require('./services/oauth.service');
 
 // Route imports
-const authRoutes = require('./routes/auth.routes');
-const clientRoutes = require('./routes/client.routes');
-const userRoutes = require('./routes/user.routes');
 const webhookRoutes = require('./routes/webhook.routes');
 
 // New multi-tenant routes
@@ -69,13 +66,13 @@ class AuthJetApp {
       origin: (origin, callback) => {
         // Default allowed origins
         const defaultOrigins = [
-          'http://localhost:3000', 
+          'http://localhost:3000',
           'http://localhost:3001',
           'http://localhost:8000',
           'http://localhost:5173', // Vite/React dev server
           'https://localhost:5173', // HTTPS for local development
           'http://127.0.0.1:3000',
-          'http://127.0.0.1:3001', 
+          'http://127.0.0.1:3001',
           'http://127.0.0.1:8000',
           'http://127.0.0.1:5173',
           'https://127.0.0.1:5173'
@@ -84,24 +81,24 @@ class AuthJetApp {
         // Combine environment variable origins with defaults
         const envOrigins = process.env.ALLOWED_ORIGINS?.split(',').map(o => o.trim()).filter(o => o) || [];
         const allowedOrigins = [...new Set([...defaultOrigins, ...envOrigins])];
-        
+
         // Development mode: allow all localhost and common dev origins
         if (process.env.NODE_ENV === 'development') {
-          const isDevelopmentOrigin = !origin || 
-            origin.includes('localhost') || 
+          const isDevelopmentOrigin = !origin ||
+            origin.includes('localhost') ||
             origin.includes('127.0.0.1') ||
             origin.includes('192.168.') || // Local network
             origin.includes('10.0.') ||    // Local network
             origin.includes('0.0.0.0') ||
             allowedOrigins.includes(origin);
-          
+
           if (isDevelopmentOrigin) {
             logger.debug(`CORS allowed (development): ${origin || 'no-origin'}`);
             callback(null, true);
             return;
           }
         }
-        
+
         // Production mode: strict origin checking
         if (process.env.NODE_ENV === 'production') {
           if (!origin) {
@@ -110,14 +107,14 @@ class AuthJetApp {
             callback(null, true);
             return;
           }
-          
+
           if (allowedOrigins.includes(origin)) {
             logger.debug(`CORS allowed (production): ${origin}`);
             callback(null, true);
             return;
           }
         }
-        
+
         // Fallback: check against allowed origins
         if (!origin || allowedOrigins.includes(origin)) {
           callback(null, true);
@@ -129,8 +126,8 @@ class AuthJetApp {
       credentials: true, // Allow cookies and authentication headers
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
       allowedHeaders: [
-        'Content-Type', 
-        'Authorization', 
+        'Content-Type',
+        'Authorization',
         'X-Requested-With',
         'X-Client-ID',
         'X-Application-ID',
@@ -191,7 +188,7 @@ class AuthJetApp {
     this.app.use('/api/user/login', strictAuthLimiter);
 
     // Body parsing
-    this.app.use(express.json({ 
+    this.app.use(express.json({
       limit: '10mb',
       verify: (req, res, buf) => {
         try {
@@ -205,9 +202,9 @@ class AuthJetApp {
         }
       }
     }));
-    
-    this.app.use(express.urlencoded({ 
-      extended: true, 
+
+    this.app.use(express.urlencoded({
+      extended: true,
       limit: '10mb',
       parameterLimit: 100 // Maximum number of URL-encoded parameters
     }));
@@ -223,10 +220,10 @@ class AuthJetApp {
         maxAge: 10 * 60 * 1000, // 10 minutes for OAuth flows
         sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
       },
-      store: process.env.NODE_ENV === 'production' ? 
+      store: process.env.NODE_ENV === 'production' ?
         // In production, you might want to use a proper session store
         // For now, we'll use MemoryStore with a warning
-        new session.MemoryStore() : 
+        new session.MemoryStore() :
         new session.MemoryStore()
     }));
 
@@ -234,7 +231,7 @@ class AuthJetApp {
     this.app.set('etag', false);
 
     // Enhanced logging
-    this.app.use(morgan('combined', { 
+    this.app.use(morgan('combined', {
       stream: logger.stream,
       skip: (req, res) => {
         // Skip logging for health checks and OPTIONS requests in production
@@ -264,19 +261,19 @@ class AuthJetApp {
     this.app.use((req, res, next) => {
       // Remove potentially sensitive headers
       res.removeHeader('X-Powered-By');
-      
+
       // Add security headers
       res.setHeader('X-Content-Type-Options', 'nosniff');
       res.setHeader('X-Frame-Options', 'DENY');
       res.setHeader('X-XSS-Protection', '1; mode=block');
       res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-      
+
       // Add CORS headers for all responses
       const origin = req.headers.origin;
       if (origin) {
         res.setHeader('Access-Control-Allow-Origin', origin);
       }
-      
+
       next();
     });
   }
@@ -317,110 +314,54 @@ class AuthJetApp {
       }
     });
 
-    // 🔐 FIX KEYS ROUTE - Add this to fix the encryption key issue
-    this.app.post('/api/fix-keys', async (req, res) => {
-      try {
-        const clientKeyService = require('./services/clientKey.service');
-        const database = require('./utils/database');
-        
-        const clientId = 'cli_a213a4990d48cb89eb4d9f6555d39280';
-        
-        console.log('🔐 Current encryption key:', clientKeyService.encryptionKey);
-        
-        // Step 1: Revoke all existing keys for this client
-        const clientDbId = await clientKeyService.getClientDbId(clientId);
-        await database.query(
-          'UPDATE client_keys SET is_active = false, revoked_at = NOW() WHERE client_id = $1',
-          [clientDbId]
-        );
-        
-        console.log('✅ Revoked existing keys');
-        
-        // Step 2: Generate new key pair with current encryption key
-        const newKey = await clientKeyService.generateKeyPair(clientId);
-        
-        console.log('✅ Generated new key:', {
-          keyId: newKey.keyId,
-          kid: newKey.kid
-        });
-        
-        // Step 3: Verify the new key works
-        const activeKey = await clientKeyService.getActiveKey(clientId);
-        if (activeKey && activeKey.private_key) {
-          console.log('✅ New key decryption successful!');
-          
-          res.json({
-            success: true,
-            message: 'New key generated successfully',
-            keyId: newKey.keyId,
-            kid: newKey.kid,
-            canDecrypt: true
-          });
-        } else {
-          throw new Error('Failed to verify new key');
-        }
-        
-      } catch (error) {
-        console.error('❌ Fix keys error:', error);
-        res.status(500).json({
-          success: false,
-          error: error.message
-        });
-      }
-    });
+    // ============================================================================
+    // ROUTE MOUNTING
+    // ============================================================================
 
-    // PUBLIC JWKS ENDPOINTS (NO AUTH REQUIRED) - Must be registered BEFORE authenticated routes
-    this.app.use('/api/client', require('./routes/jwks.routes'));
-
-    // OAuth 2.0 routes
-    this.app.use('/oauth', require('./routes/oauth.routes'));
-    this.app.use('/auth', require('./routes/oauth.routes'));
-    
-    // Social OAuth routes
-    this.app.use('/api/auth', require('./routes/socialAuth.routes'));
-
-    // Dashboard routes
-    this.app.use('/api/dashboard', require('./routes/dashboard.routes'));
-
-    // Legacy routes (for backward compatibility)
-    this.app.use('/api/auth', authRoutes);
-    this.app.use('/api/clients', clientRoutes);
-    this.app.use('/api/users', userRoutes);
-    this.app.use('/api/webhooks', webhookRoutes);
-    
-    this.app.use('/api/analytics', require('./routes/analytics.routes'));
-
-    // New multi-tenant routes
-    this.app.use('/api/admin', adminRoutes);
-    this.app.use('/api/client', clientAuthRoutes);
-    
-    // User authentication routes
-    this.app.use('/api/user', userAuthRoutes);
-    this.app.use('/api/user', jwksRoutes);
-    this.app.use('/api/client', require('./routes/clientKeys.routes'));
-
-    // JWKS endpoint
+    // 1. PUBLIC JWKS ENDPOINTS (No Auth)
+    // Mounted at root to follow standard convention: /.well-known/jwks.json
     this.app.get('/.well-known/jwks.json', (req, res) => {
       try {
         const jwtService = require('./services/jwt.service');
         const jwk = jwtService.getPublicJwk();
-        
+
         if (!jwk) {
-          return res.status(501).json({ 
+          return res.status(501).json({
             error: 'JWKS not supported with current configuration',
             code: 'JWKS_NOT_SUPPORTED'
           });
         }
-        
+
         res.json({ keys: [jwk] });
       } catch (error) {
         logger.error('JWKS endpoint error:', error);
-        res.status(500).json({ 
+        res.status(500).json({
           error: 'Failed to retrieve JWKS',
           code: 'JWKS_ERROR'
         });
       }
     });
+
+    // Application specific JWKS (from Phase 1D)
+    this.app.use('/', require('./routes/jwks.routes'));
+
+    // 2. SOCIAL AUTH ROUTES
+    this.app.use('/api/auth/social', require('./routes/socialAuth.routes'));
+
+    // 3. MULTI-TENANT API ROUTES (The New Standard)
+
+    // Admin Routes (Platform Administrators)
+    this.app.use('/api/admin', adminRoutes);
+
+    // Client Routes (Organizations/Tenants)
+    this.app.use('/api/client', clientAuthRoutes); // Includes auth, profile, apps, keys, webhooks
+
+    // User Routes (End Users of Applications)
+    this.app.use('/api/user', userAuthRoutes); // Includes registration, login, profile
+
+    // 4. SHARED/UTILITY ROUTES
+    this.app.use('/api/dashboard', require('./routes/dashboard.routes')); // Shared dashboard data
+    this.app.use('/api/analytics', require('./routes/analytics.routes')); // Analytics
 
     // API information endpoint
     this.app.get('/api', (req, res) => {
@@ -428,13 +369,13 @@ class AuthJetApp {
         name: 'AuthJet OAuth Provider',
         version: process.env.npm_package_version || '1.0.0',
         description: 'Multi-tenant OAuth 2.0 authentication service',
-        documentation: '/api/docs', // You can add Swagger docs later
+        documentation: '/api/docs',
         endpoints: {
-          auth: '/api/auth',
-          user: '/api/user',
-          client: '/api/client',
           admin: '/api/admin',
-          oauth: '/oauth'
+          client: '/api/client',
+          user: '/api/user',
+          social: '/api/auth/social',
+          jwks: '/.well-known/jwks.json'
         }
       });
     });
@@ -465,7 +406,7 @@ class AuthJetApp {
         logger.info(`AuthJet server running on port ${PORT}`);
         logger.info(`Environment: ${process.env.NODE_ENV}`);
         logger.info(`CORS enabled for origins: ${process.env.ALLOWED_ORIGINS || 'default development origins'}`);
-        
+
         if (process.env.NODE_ENV === 'development') {
           logger.info('Development mode: CORS is permissive for localhost origins');
           logger.info('Available endpoints:');

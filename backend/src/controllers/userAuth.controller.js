@@ -6,7 +6,7 @@ const userJwtService = require('../services/userJwt.service');
 const emailService = require('../services/email.service');
 
 class UserAuthController {
-  
+
   // Helper method to extract roles from roles_config JSONB
   extractRolesFromConfig(rolesConfig) {
     let available_roles = ['user'];
@@ -14,17 +14,17 @@ class UserAuthController {
 
     if (rolesConfig) {
       try {
-        const roles = typeof rolesConfig === 'string' 
-          ? JSON.parse(rolesConfig) 
+        const roles = typeof rolesConfig === 'string'
+          ? JSON.parse(rolesConfig)
           : rolesConfig;
-        
+
         if (Array.isArray(roles) && roles.length > 0) {
           // Extract available role names
           available_roles = roles.map(role => role.name).filter(Boolean);
-          
+
           // Find default role: first by isDefault flag, then by lowest hierarchy
           const defaultRoleByFlag = roles.find(role => role.isDefault === true);
-          
+
           if (defaultRoleByFlag) {
             default_user_role = defaultRoleByFlag.name;
           } else {
@@ -41,22 +41,22 @@ class UserAuthController {
     return { available_roles, default_user_role };
   }
 
-    async register(req, res, next) {
-  const { email, password, name, client_id, application_id } = req.body;
-  
-  try {
-    // Validate required fields
-    if (!email || !password || !client_id || !application_id) {
-      return res.status(400).json({
-        error: 'Email, password, client_id, and application_id are required',
-        code: 'MISSING_REQUIRED_FIELDS',
-      });
-    }
+  async register(req, res, next) {
+    const { email, password, name, client_id, application_id } = req.body;
 
-    console.log('Register attempt:', { email, client_id, application_id, name });
+    try {
+      // Validate required fields
+      if (!email || !password || !client_id || !application_id) {
+        return res.status(400).json({
+          error: 'Email, password, client_id, and application_id are required',
+          code: 'MISSING_REQUIRED_FIELDS',
+        });
+      }
 
-    // Verify client and application exist and are active
-    const appQuery = `
+      console.log('Register attempt:', { email, client_id, application_id, name });
+
+      // Verify client and application exist and are active
+      const appQuery = `
       SELECT 
         ca.*, 
         c.id as client_db_id,
@@ -69,74 +69,74 @@ class UserAuthController {
       JOIN clients c ON ca.client_id = c.id
       WHERE ca.id = $1 AND c.client_id = $2 AND ca.is_active = true AND c.is_active = true
     `;
-    
-    console.log('Checking application with:', [application_id, client_id]);
-    const appResult = await database.query(appQuery, [application_id, client_id]);
-    console.log('Application check result:', appResult.rows.length ? 'Found' : 'Not found');
-    
-    if (appResult.rows.length === 0) {
-      // Debug why application not found
-      const clientCheck = await database.query(
-        'SELECT id, client_id, name, is_active FROM clients WHERE client_id = $1',
-        [client_id]
-      );
-      console.log('Client check:', clientCheck.rows);
-      
-      const appOnlyCheck = await database.query(
-        'SELECT id, client_id, name, is_active FROM client_applications WHERE id = $1',
-        [application_id]
-      );
-      console.log('Application only check:', appOnlyCheck.rows);
 
-      return res.status(400).json({
-        error: 'Invalid client application or application not active',
-        code: 'INVALID_APPLICATION',
-        debug: {
-          client_exists: clientCheck.rows.length > 0,
-          application_exists: appOnlyCheck.rows.length > 0
-        }
+      console.log('Checking application with:', [application_id, client_id]);
+      const appResult = await database.query(appQuery, [application_id, client_id]);
+      console.log('Application check result:', appResult.rows.length ? 'Found' : 'Not found');
+
+      if (appResult.rows.length === 0) {
+        // Debug why application not found
+        const clientCheck = await database.query(
+          'SELECT id, client_id, name, is_active FROM clients WHERE client_id = $1',
+          [client_id]
+        );
+        console.log('Client check:', clientCheck.rows);
+
+        const appOnlyCheck = await database.query(
+          'SELECT id, client_id, name, is_active FROM client_applications WHERE id = $1',
+          [application_id]
+        );
+        console.log('Application only check:', appOnlyCheck.rows);
+
+        return res.status(400).json({
+          error: 'Invalid client application or application not active',
+          code: 'INVALID_APPLICATION',
+          debug: {
+            client_exists: clientCheck.rows.length > 0,
+            application_exists: appOnlyCheck.rows.length > 0
+          }
+        });
+      }
+
+      const application = appResult.rows[0];
+      const clientDbId = application.client_db_id;
+
+      console.log('Found application:', {
+        appName: application.name,
+        clientDbId: clientDbId,
+        clientName: application.client_name
       });
-    }
 
-    const application = appResult.rows[0];
-    const clientDbId = application.client_db_id;
+      // Extract roles from roles_config
+      const { available_roles, default_user_role } = this.extractRolesFromConfig(application.roles_config);
+      console.log('Roles config:', { available_roles, default_user_role });
 
-    console.log('Found application:', {
-      appName: application.name,
-      clientDbId: clientDbId,
-      clientName: application.client_name
-    });
-
-    // Extract roles from roles_config
-    const { available_roles, default_user_role } = this.extractRolesFromConfig(application.roles_config);
-    console.log('Roles config:', { available_roles, default_user_role });
-
-    // Check if user already exists for this application
-    const existingQuery = `
+      // Check if user already exists for this application
+      const existingQuery = `
       SELECT id FROM users 
       WHERE email = $1 AND client_id = $2 AND application_id = $3
     `;
-    
-    const existing = await database.query(existingQuery, [email, clientDbId, application_id]);
-    console.log('Existing user check:', existing.rows.length ? 'Exists' : 'New user');
-    
-    if (existing.rows.length > 0) {
-      return res.status(409).json({
-        error: 'User already exists for this application',
-        code: 'USER_EXISTS',
-      });
-    }
 
-    // Hash password
-    const passwordHash = await crypto.hashPassword(password);
-    console.log('Password hashed successfully');
+      const existing = await database.query(existingQuery, [email, clientDbId, application_id]);
+      console.log('Existing user check:', existing.rows.length ? 'Exists' : 'New user');
 
-    // Ensure default role is in available roles
-    const finalRole = available_roles.includes(default_user_role) ? default_user_role : 'user';
-    console.log('Final user role:', finalRole);
+      if (existing.rows.length > 0) {
+        return res.status(409).json({
+          error: 'User already exists for this application',
+          code: 'USER_EXISTS',
+        });
+      }
 
-    // Create user
-    const insertQuery = `
+      // Hash password
+      const passwordHash = await crypto.hashPassword(password);
+      console.log('Password hashed successfully');
+
+      // Ensure default role is in available roles
+      const finalRole = available_roles.includes(default_user_role) ? default_user_role : 'user';
+      console.log('Final user role:', finalRole);
+
+      // Create user
+      const insertQuery = `
       INSERT INTO users (
         client_id, application_id, email, password_hash, name, role,
         is_active, email_verified, created_at, updated_at
@@ -144,85 +144,85 @@ class UserAuthController {
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
       RETURNING id, email, name, role, created_at, email_verified
     `;
-    
-    const result = await database.query(insertQuery, [
-      clientDbId,
-      application_id,
-      email,
-      passwordHash,
-      name,
-      finalRole,
-      true,
-      false
-    ]);
 
-    const user = result.rows[0];
-    console.log('User created successfully:', { userId: user.id, email: user.email });
+      const result = await database.query(insertQuery, [
+        clientDbId,
+        application_id,
+        email,
+        passwordHash,
+        name,
+        finalRole,
+        true,
+        false
+      ]);
 
-    // Send email verification
-    try {
-      await emailService.sendUserVerificationEmail(email, name, user.id, application_id);
-      console.log('Verification email sent');
-    } catch (emailError) {
-      console.error('Failed to send verification email:', emailError);
-      logger.error('Failed to send verification email:', emailError);
-    }
+      const user = result.rows[0];
+      console.log('User created successfully:', { userId: user.id, email: user.email });
 
-    // Generate tokens
-    const accessToken = await userJwtService.generateAccessTokenWithFallback(user, client_id, application_id);
-    const refreshToken = await userJwtService.generateRefreshToken(user.id, client_id, application_id);
-    console.log('Tokens generated successfully');
-
-    logger.info('User registered successfully', { 
-      userId: user.id, 
-      clientId: client_id,
-      applicationId: application_id 
-    });
-
-    res.status(201).json({
-      access_token: accessToken,
-      refresh_token: refreshToken,
-      token_type: 'Bearer',
-      expires_in: process.env.NODE_ENV === 'production' ? 3600 : 900,
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        email_verified: user.email_verified
-      },
-      application: {
-        id: application_id,
-        name: application.name,
-        auth_mode: application.auth_mode,
-        available_roles: available_roles,
-        default_user_role: default_user_role
+      // Send email verification
+      try {
+        await emailService.sendUserVerificationEmail(email, name, user.id, application_id);
+        console.log('Verification email sent');
+      } catch (emailError) {
+        console.error('Failed to send verification email:', emailError);
+        logger.error('Failed to send verification email:', emailError);
       }
-    });
 
-  } catch (error) {
-    console.error('User registration error:', error);
-    logger.error('User registration error:', error);
-    next(error);
-  }
-}
+      // Generate tokens
+      const accessToken = await userJwtService.generateAccessTokenWithFallback(user, client_id, application_id);
+      const refreshToken = await userJwtService.generateRefreshToken(user.id, application_id, req.ip);
+      console.log('Tokens generated successfully');
 
-async login(req, res, next) {
-  const { email, password, client_id, application_id } = req.body;
-  
-  try {
-    // Validate required fields
-    if (!email || !password || !client_id || !application_id) {
-      return res.status(400).json({
-        error: 'Email, password, client_id, and application_id are required',
-        code: 'MISSING_REQUIRED_FIELDS',
+      logger.info('User registered successfully', {
+        userId: user.id,
+        clientId: client_id,
+        applicationId: application_id
       });
+
+      res.status(201).json({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+        token_type: 'Bearer',
+        expires_in: process.env.NODE_ENV === 'production' ? 3600 : 900,
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          email_verified: user.email_verified
+        },
+        application: {
+          id: application_id,
+          name: application.name,
+          auth_mode: application.auth_mode,
+          available_roles: available_roles,
+          default_user_role: default_user_role
+        }
+      });
+
+    } catch (error) {
+      console.error('User registration error:', error);
+      logger.error('User registration error:', error);
+      next(error);
     }
+  }
 
-    console.log('Login attempt:', { email, client_id, application_id });
+  async login(req, res, next) {
+    const { email, password, client_id, application_id } = req.body;
 
-    // Find user for this specific application - FIXED QUERY
-    const userQuery = `
+    try {
+      // Validate required fields
+      if (!email || !password || !client_id || !application_id) {
+        return res.status(400).json({
+          error: 'Email, password, client_id, and application_id are required',
+          code: 'MISSING_REQUIRED_FIELDS',
+        });
+      }
+
+      console.log('Login attempt:', { email, client_id, application_id });
+
+      // Find user for this specific application - FIXED QUERY
+      const userQuery = `
       SELECT 
         u.*, 
         ca.name as application_name, 
@@ -240,171 +240,171 @@ async login(req, res, next) {
         AND ca.is_active = true 
         AND c.is_active = true
     `;
-    
-    console.log('Executing user query with:', [email, client_id, application_id]);
-    const result = await database.query(userQuery, [email, client_id, application_id]);
-    console.log('User query result count:', result.rows.length);
 
-    if (result.rows.length === 0) {
-      // Detailed debugging for why no user found
-      console.log('No user found. Running diagnostic checks...');
-      
-      // Check client by string client_id
-      const clientCheck = await database.query(
-        'SELECT id, client_id, name, is_active FROM clients WHERE client_id = $1',
-        [client_id]
-      );
-      console.log('Client check:', clientCheck.rows[0] || 'Not found');
-      
-      // Check application by numeric ID
-      const appCheck = await database.query(
-        'SELECT id, name, client_id, is_active FROM client_applications WHERE id = $1',
-        [application_id]
-      );
-      console.log('Application check:', appCheck.rows[0] || 'Not found');
-      
-      // Check if application belongs to client (using numeric client ID from clients table)
-      if (appCheck.rows.length > 0 && clientCheck.rows.length > 0) {
-        const appClientMatch = await database.query(
-          'SELECT ca.id FROM client_applications ca WHERE ca.id = $1 AND ca.client_id = $2',
-          [application_id, clientCheck.rows[0].id]
+      console.log('Executing user query with:', [email, client_id, application_id]);
+      const result = await database.query(userQuery, [email, client_id, application_id]);
+      console.log('User query result count:', result.rows.length);
+
+      if (result.rows.length === 0) {
+        // Detailed debugging for why no user found
+        console.log('No user found. Running diagnostic checks...');
+
+        // Check client by string client_id
+        const clientCheck = await database.query(
+          'SELECT id, client_id, name, is_active FROM clients WHERE client_id = $1',
+          [client_id]
         );
-        console.log('Application-client match:', appClientMatch.rows.length ? 'Matches' : 'No match');
-      }
-      
-      // Check user with just email to see if they exist in other clients/applications
-      const userEmailCheck = await database.query(
-        `SELECT u.id, u.email, u.client_id, u.application_id, u.is_active, 
+        console.log('Client check:', clientCheck.rows[0] || 'Not found');
+
+        // Check application by numeric ID
+        const appCheck = await database.query(
+          'SELECT id, name, client_id, is_active FROM client_applications WHERE id = $1',
+          [application_id]
+        );
+        console.log('Application check:', appCheck.rows[0] || 'Not found');
+
+        // Check if application belongs to client (using numeric client ID from clients table)
+        if (appCheck.rows.length > 0 && clientCheck.rows.length > 0) {
+          const appClientMatch = await database.query(
+            'SELECT ca.id FROM client_applications ca WHERE ca.id = $1 AND ca.client_id = $2',
+            [application_id, clientCheck.rows[0].id]
+          );
+          console.log('Application-client match:', appClientMatch.rows.length ? 'Matches' : 'No match');
+        }
+
+        // Check user with just email to see if they exist in other clients/applications
+        const userEmailCheck = await database.query(
+          `SELECT u.id, u.email, u.client_id, u.application_id, u.is_active, 
                 c.client_id as client_string_id, ca.name as app_name
          FROM users u
          JOIN clients c ON u.client_id = c.id
          JOIN client_applications ca ON u.application_id = ca.id
          WHERE u.email = $1`,
-        [email]
-      );
-      console.log('User by email only (with client/app info):', userEmailCheck.rows);
+          [email]
+        );
+        console.log('User by email only (with client/app info):', userEmailCheck.rows);
 
-      return res.status(401).json({
-        error: 'Invalid credentials or application',
-        code: 'INVALID_CREDENTIALS',
-        debug: {
-          client_exists: clientCheck.rows.length > 0,
-          application_exists: appCheck.rows.length > 0,
-          user_by_email_exists: userEmailCheck.rows.length > 0,
-          user_matches_client_app: userEmailCheck.rows.some(user => 
-            user.client_string_id === client_id && user.application_id == application_id
-          )
+        return res.status(401).json({
+          error: 'Invalid credentials or application',
+          code: 'INVALID_CREDENTIALS',
+          debug: {
+            client_exists: clientCheck.rows.length > 0,
+            application_exists: appCheck.rows.length > 0,
+            user_by_email_exists: userEmailCheck.rows.length > 0,
+            user_matches_client_app: userEmailCheck.rows.some(user =>
+              user.client_string_id === client_id && user.application_id == application_id
+            )
+          }
+        });
+      }
+
+      const user = result.rows[0];
+      console.log('User found:', {
+        userId: user.id,
+        email: user.email,
+        role: user.role,
+        isActive: user.is_active,
+        clientId: user.client_id, // numeric
+        applicationId: user.application_id // numeric
+      });
+
+      // Extract roles for the response
+      const { available_roles, default_user_role } = this.extractRolesFromConfig(user.roles_config);
+
+      // Password verification
+      console.log('Verifying password...');
+      let isValidPassword = false;
+      try {
+        if (typeof crypto.comparePassword === 'function') {
+          isValidPassword = await crypto.comparePassword(password, user.password_hash);
+        } else if (typeof crypto.verifyPassword === 'function') {
+          isValidPassword = await crypto.verifyPassword(password, user.password_hash);
+        } else {
+          const bcrypt = require('bcrypt');
+          isValidPassword = await bcrypt.compare(password, user.password_hash);
+        }
+        console.log('Password valid:', isValidPassword);
+      } catch (passwordError) {
+        console.error('Password verification error:', passwordError);
+        logger.error('Password verification error:', passwordError);
+        isValidPassword = false;
+      }
+
+      if (!isValidPassword) {
+        console.log('Invalid password for user:', user.email);
+        return res.status(401).json({
+          error: 'Invalid credentials',
+          code: 'INVALID_CREDENTIALS',
+        });
+      }
+
+      // Update last login
+      await database.query(
+        'UPDATE users SET last_login = NOW(), updated_at = NOW() WHERE id = $1',
+        [user.id]
+      );
+      console.log('Last login updated');
+
+      // Generate tokens
+      const accessToken = await userJwtService.generateAccessTokenWithFallback(user, client_id, application_id);
+      const refreshToken = await userJwtService.generateRefreshToken(user.id, application_id, req.ip);
+      console.log('Tokens generated');
+
+      logger.info('User login successful', {
+        userId: user.id,
+        clientId: client_id,
+        applicationId: application_id
+      });
+
+      // Set HTTP-only cookies for security
+      const cookieOptions = {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax'
+      };
+
+      res.cookie('access_token', accessToken, {
+        ...cookieOptions,
+        maxAge: 15 * 60 * 1000, // 15 minutes
+      });
+
+      res.cookie('refresh_token', refreshToken, {
+        ...cookieOptions,
+        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      });
+
+      console.log('Login successful, sending response');
+      res.json({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+        token_type: 'Bearer',
+        expires_in: process.env.NODE_ENV === 'production' ? 3600 : 900,
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          email_verified: user.email_verified
+        },
+        application: {
+          id: application_id,
+          name: user.application_name,
+          auth_mode: user.auth_mode,
+          available_roles: available_roles,
+          default_user_role: default_user_role
         }
       });
+
+    } catch (error) {
+      console.error('User login error:', error);
+      logger.error('User login error:', error);
+      next(error);
     }
-
-    const user = result.rows[0];
-    console.log('User found:', { 
-      userId: user.id, 
-      email: user.email, 
-      role: user.role,
-      isActive: user.is_active,
-      clientId: user.client_id, // numeric
-      applicationId: user.application_id // numeric
-    });
-
-    // Extract roles for the response
-    const { available_roles, default_user_role } = this.extractRolesFromConfig(user.roles_config);
-
-    // Password verification
-    console.log('Verifying password...');
-    let isValidPassword = false;
-    try {
-      if (typeof crypto.comparePassword === 'function') {
-        isValidPassword = await crypto.comparePassword(password, user.password_hash);
-      } else if (typeof crypto.verifyPassword === 'function') {
-        isValidPassword = await crypto.verifyPassword(password, user.password_hash);
-      } else {
-        const bcrypt = require('bcrypt');
-        isValidPassword = await bcrypt.compare(password, user.password_hash);
-      }
-      console.log('Password valid:', isValidPassword);
-    } catch (passwordError) {
-      console.error('Password verification error:', passwordError);
-      logger.error('Password verification error:', passwordError);
-      isValidPassword = false;
-    }
-    
-    if (!isValidPassword) {
-      console.log('Invalid password for user:', user.email);
-      return res.status(401).json({
-        error: 'Invalid credentials',
-        code: 'INVALID_CREDENTIALS',
-      });
-    }
-
-    // Update last login
-    await database.query(
-      'UPDATE users SET last_login = NOW(), updated_at = NOW() WHERE id = $1',
-      [user.id]
-    );
-    console.log('Last login updated');
-
-    // Generate tokens
-    const accessToken = await userJwtService.generateAccessTokenWithFallback(user, client_id, application_id);
-    const refreshToken = await userJwtService.generateRefreshToken(user.id, client_id, application_id);
-    console.log('Tokens generated');
-
-    logger.info('User login successful', { 
-      userId: user.id, 
-      clientId: client_id,
-      applicationId: application_id 
-    });
-
-    // Set HTTP-only cookies for security
-    const cookieOptions = {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax'
-    };
-
-    res.cookie('access_token', accessToken, {
-      ...cookieOptions,
-      maxAge: 15 * 60 * 1000, // 15 minutes
-    });
-
-    res.cookie('refresh_token', refreshToken, {
-      ...cookieOptions,
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    });
-
-    console.log('Login successful, sending response');
-    res.json({
-      access_token: accessToken,
-      refresh_token: refreshToken,
-      token_type: 'Bearer',
-      expires_in: process.env.NODE_ENV === 'production' ? 3600 : 900,
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        email_verified: user.email_verified
-      },
-      application: {
-        id: application_id,
-        name: user.application_name,
-        auth_mode: user.auth_mode,
-        available_roles: available_roles,
-        default_user_role: default_user_role
-      }
-    });
-    
-  } catch (error) {
-    console.error('User login error:', error);
-    logger.error('User login error:', error);
-    next(error);
   }
-}
 
   async refreshToken(req, res, next) {
     const { refresh_token } = req.body;
-    
+
     try {
       if (!refresh_token) {
         return res.status(400).json({
@@ -419,14 +419,14 @@ async login(req, res, next) {
 
     } catch (error) {
       logger.error('Token refresh error:', error);
-      
+
       if (error.message.includes('Invalid or expired') || error.message.includes('exceeded maximum uses')) {
         return res.status(401).json({
           error: error.message,
           code: 'INVALID_REFRESH_TOKEN',
         });
       }
-      
+
       next(error);
     }
   }
@@ -434,7 +434,7 @@ async login(req, res, next) {
   async requestRoleUpgrade(req, res, next) {
     const { user_id } = req.params;
     const { requested_role } = req.body;
-    
+
     try {
       // Verify user exists and belongs to this application - FIXED QUERY
       const userQuery = `
@@ -450,10 +450,10 @@ async login(req, res, next) {
         JOIN clients c ON u.client_id = c.id
         WHERE u.id = $1 AND u.client_id = $2 AND u.application_id = $3
       `;
-      
+
       const userResult = await database.query(userQuery, [
-        user_id, 
-        req.user.client_id, 
+        user_id,
+        req.user.client_id,
         req.user.application_id
       ]);
 
@@ -502,9 +502,9 @@ async login(req, res, next) {
         VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING id
       `;
-      
+
       const expiresAt = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000); // 3 days
-      
+
       await database.query(requestQuery, [
         user_id,
         req.user.client_id,
@@ -550,7 +550,7 @@ async login(req, res, next) {
 
   async verifyEmail(req, res, next) {
     const { token } = req.body;
-    
+
     try {
       if (!token) {
         return res.status(400).json({
@@ -562,14 +562,14 @@ async login(req, res, next) {
       // In a real implementation, you'd verify the JWT token and extract user ID
       // For now, let's assume token contains user ID (you'd use JWT in production)
       const userId = parseInt(token); // This is simplified - use JWT in production
-      
+
       const query = `
         UPDATE users 
         SET email_verified = true, updated_at = NOW()
         WHERE id = $1
         RETURNING id, email, email_verified
       `;
-      
+
       const result = await database.query(query, [userId]);
 
       if (result.rows.length === 0) {
@@ -595,7 +595,7 @@ async login(req, res, next) {
   async getProfile(req, res, next) {
     try {
       const user_id = req.user?.id;
-      
+
       if (!user_id) {
         return res.status(401).json({
           error: 'User authentication required',
@@ -616,10 +616,10 @@ async login(req, res, next) {
         JOIN clients c ON u.client_id = c.id
         WHERE u.id = $1 AND u.client_id = $2 AND u.application_id = $3
       `;
-      
+
       const result = await database.query(query, [
-        user_id, 
-        req.user.client_id, 
+        user_id,
+        req.user.client_id,
         req.user.application_id
       ]);
 
@@ -631,7 +631,7 @@ async login(req, res, next) {
       }
 
       const user = result.rows[0];
-      
+
       // Extract roles for the response
       const { available_roles } = this.extractRolesFromConfig(user.roles_config);
 
@@ -673,13 +673,13 @@ async login(req, res, next) {
       if (user_id) {
         // Revoke all sessions for this user in this application
         await userJwtService.revokeAllUserSessions(
-          user_id, 
-          req.user.client_id, 
+          user_id,
+          req.user.client_id,
           req.user.application_id
         );
       }
 
-      logger.info('User logout successful', { 
+      logger.info('User logout successful', {
         userId: user_id,
         clientId: req.user?.client_id,
         applicationId: req.user?.application_id
@@ -695,7 +695,7 @@ async login(req, res, next) {
 
   async resendVerificationEmail(req, res, next) {
     const { user_id, email } = req.body;
-    
+
     try {
       if (!user_id && !email) {
         return res.status(400).json({
@@ -706,7 +706,7 @@ async login(req, res, next) {
 
       let query = 'SELECT id, email, name, email_verified FROM users WHERE ';
       let params = [];
-      
+
       if (user_id) {
         query += 'id = $1';
         params.push(user_id);
@@ -735,17 +735,17 @@ async login(req, res, next) {
 
       // Send verification email
       await emailService.sendUserVerificationEmail(
-        user.email, 
-        user.name, 
+        user.email,
+        user.name,
         user.id,
         req.query.application_id
       );
 
       logger.info('Verification email resent', { userId: user.id });
 
-      res.json({ 
+      res.json({
         message: 'Verification email sent successfully',
-        email: user.email 
+        email: user.email
       });
 
     } catch (error) {
@@ -756,7 +756,7 @@ async login(req, res, next) {
 
   async getRoleRequests(req, res, next) {
     const { user_id } = req.params;
-    
+
     try {
       const query = `
         SELECT 
@@ -766,10 +766,10 @@ async login(req, res, next) {
         WHERE user_id = $1 AND client_id = $2 AND application_id = $3
         ORDER BY created_at DESC
       `;
-      
+
       const result = await database.query(query, [
-        user_id, 
-        req.user.client_id, 
+        user_id,
+        req.user.client_id,
         req.user.application_id
       ]);
 
@@ -784,7 +784,7 @@ async login(req, res, next) {
   async updateProfile(req, res, next) {
     const { name } = req.body;
     const user_id = req.user.id;
-    
+
     try {
       if (!name) {
         return res.status(400).json({
@@ -799,7 +799,7 @@ async login(req, res, next) {
         WHERE id = $2 AND client_id = $3 AND application_id = $4
         RETURNING id, email, name, role, email_verified
       `;
-      
+
       const result = await database.query(query, [
         name,
         user_id,
@@ -816,7 +816,7 @@ async login(req, res, next) {
 
       logger.info('User profile updated', { userId: user_id });
 
-      res.json({ 
+      res.json({
         message: 'Profile updated successfully',
         user: result.rows[0]
       });

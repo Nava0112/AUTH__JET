@@ -8,7 +8,7 @@ const emailService = require('../services/email.service');
 class AdminController {
   async register(req, res, next) {
     const { email, password, name, justification } = req.body;
-    
+
     try {
       // Validation
       if (!email || !password || !name) {
@@ -130,22 +130,22 @@ class AdminController {
 
       try {
         await emailService.send(emailContent);
-        logger.info('Admin approval email sent', { 
-          requestId: request.id, 
+        logger.info('Admin approval email sent', {
+          requestId: request.id,
           requesterEmail: email,
           superAdminEmail: superAdminEmail
         });
       } catch (emailError) {
-        logger.error('Failed to send admin approval email', { 
+        logger.error('Failed to send admin approval email', {
           error: emailError.message,
           requestId: request.id
         });
         // Don't fail the request if email fails, just log it
       }
 
-      logger.info('Admin registration request created', { 
-        requestId: request.id, 
-        email: request.email 
+      logger.info('Admin registration request created', {
+        requestId: request.id,
+        email: request.email
       });
 
       res.status(201).json({
@@ -169,7 +169,7 @@ class AdminController {
 
   async login(req, res, next) {
     const { email, password } = req.body;
-    
+
     try {
       // Find admin
       const adminQuery = `
@@ -177,7 +177,7 @@ class AdminController {
         FROM admins 
         WHERE email = $1
       `;
-      
+
       const result = await database.query(adminQuery, [email]);
 
       if (result.rows.length === 0) {
@@ -198,7 +198,7 @@ class AdminController {
 
       // Verify password
       const isValidPassword = await crypto.comparePassword(password, admin.password_hash);
-      
+
       if (!isValidPassword) {
         return res.status(401).json({
           error: 'Invalid credentials',
@@ -219,7 +219,7 @@ class AdminController {
         process.env.JWT_SECRET,
         { expiresIn: '24h' }
       );
-      
+
       const refreshToken = jwt.sign(
         {
           sub: admin.id,
@@ -230,28 +230,23 @@ class AdminController {
         { expiresIn: '7d' }
       );
 
-      // Create session
+      // Create session using polymorphic design
       const sessionQuery = `
         INSERT INTO sessions (
-          admin_id, session_type, token_hash, refresh_token_hash,
-          expires_at, refresh_expires_at, ip_address, user_agent
+          session_type, entity_id, refresh_token,
+          expires_at, ip_address, user_agent
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING id
       `;
 
-      const tokenHash = await crypto.hashPassword(accessToken);
-      const refreshTokenHash = await crypto.hashPassword(refreshToken);
-      const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
-      const refreshExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
 
       await database.query(sessionQuery, [
-        admin.id,
         'admin',
-        tokenHash,
-        refreshTokenHash,
+        admin.id,
+        refreshToken,
         expiresAt,
-        refreshExpiresAt,
         req.ip,
         req.get('User-Agent')
       ]);
@@ -291,9 +286,9 @@ class AdminController {
         FROM admins 
         WHERE id = $1
       `;
-      
+
       const result = await database.query(adminQuery, [req.admin.id]);
-      
+
       if (result.rows.length === 0) {
         return res.status(404).json({
           error: 'Admin not found',
@@ -335,7 +330,7 @@ class AdminController {
       };
 
       const stats = {};
-      
+
       for (const [key, query] of Object.entries(statsQueries)) {
         const result = await database.query(query);
         stats[key] = result.rows[0];
@@ -370,7 +365,7 @@ class AdminController {
         LEFT JOIN users u ON c.id = u.client_id AND u.is_active = true
         WHERE 1=1
       `;
-      
+
       let countQuery = 'SELECT COUNT(*) FROM clients WHERE 1=1';
       const params = [];
       let paramCount = 0;
@@ -447,7 +442,7 @@ class AdminController {
         WHERE c.id = $1
         GROUP BY c.id
       `;
-      
+
       const result = await database.query(clientQuery, [id]);
 
       if (result.rows.length === 0) {
@@ -471,10 +466,10 @@ class AdminController {
       const updates = req.body;
 
       const allowedFields = [
-        'name', 'company_name', 'website', 'phone', 'plan_type', 
+        'name', 'company_name', 'website', 'phone', 'plan_type',
         'subscription_status', 'billing_email', 'is_active'
       ];
-      
+
       const updateFields = [];
       const updateValues = [];
       let paramCount = 0;
@@ -559,7 +554,7 @@ class AdminController {
 
       logger.info('Client suspended by admin', { clientId: id, adminId: req.admin.id, reason });
 
-      res.json({ 
+      res.json({
         client: result.rows[0],
         message: 'Client suspended successfully'
       });
@@ -598,7 +593,7 @@ class AdminController {
 
       logger.info('Client activated by admin', { clientId: id, adminId: req.admin.id });
 
-      res.json({ 
+      res.json({
         client: result.rows[0],
         message: 'Client activated successfully'
       });
@@ -619,7 +614,7 @@ class AdminController {
           (SELECT COUNT(*) FROM client_applications WHERE client_id = $1) as app_count,
           (SELECT COUNT(*) FROM users WHERE client_id = $1) as user_count
       `;
-      
+
       const dependencies = await database.query(dependenciesQuery, [id]);
       const { app_count, user_count } = dependencies.rows[0];
 
@@ -653,19 +648,19 @@ class AdminController {
       await database.query(`
         INSERT INTO audit_logs (admin_id, action, metadata)
         VALUES ($1, $2, $3)
-      `, [req.admin.id, 'client_deleted', JSON.stringify({ 
-        clientId: id, 
+      `, [req.admin.id, 'client_deleted', JSON.stringify({
+        clientId: id,
         clientName: result.rows[0].name,
-        clientEmail: result.rows[0].email 
+        clientEmail: result.rows[0].email
       })]);
 
-      logger.info('Client deleted by admin', { 
-        clientId: id, 
+      logger.info('Client deleted by admin', {
+        clientId: id,
         adminId: req.admin.id,
         clientName: result.rows[0].name
       });
 
-      res.json({ 
+      res.json({
         message: 'Client deleted successfully',
         client: result.rows[0]
       });
@@ -680,7 +675,7 @@ class AdminController {
     try {
       // Revoke current session
       await database.query(
-        'UPDATE sessions SET revoked = true, revoked_at = NOW() WHERE admin_id = $1 AND session_type = $2',
+        'UPDATE sessions SET revoked = true, revoked_at = NOW() WHERE entity_id = $1 AND session_type = $2',
         [req.admin.id, 'admin']
       );
 
@@ -726,14 +721,339 @@ class AdminController {
     }
   }
 
+  async approveAdminRequest(req, res, next) {
+    try {
+      const { token } = req.params;
+
+      // Verify and decode token
+      let decoded;
+      try {
+        decoded = jwt.verify(token, process.env.JWT_SECRET);
+      } catch (error) {
+        return res.status(400).send(`
+          <html>
+            <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px;">
+              <div style="text-align: center; color: #dc2626;">
+                <h2>❌ Invalid or Expired Token</h2>
+                <p>This approval link is invalid or has expired.</p>
+                <p>Please contact the system administrator for assistance.</p>
+              </div>
+            </body>
+          </html>
+        `);
+      }
+
+      if (decoded.action !== 'approve') {
+        return res.status(400).send('<h2>Invalid action</h2>');
+      }
+
+      // Get the admin request
+      const requestResult = await database.query(
+        'SELECT * FROM admin_requests WHERE id = $1 AND status = $2',
+        [decoded.requestId, 'pending']
+      );
+
+      if (requestResult.rows.length === 0) {
+        return res.status(404).send(`
+          <html>
+            <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px;">
+              <div style="text-align: center; color: #dc2626;">
+                <h2>❌ Request Not Found</h2>
+                <p>This admin request was not found or has already been processed.</p>
+              </div>
+            </body>
+          </html>
+        `);
+      }
+
+      const request = requestResult.rows[0];
+
+      // Check if admin already exists (in case someone was created manually)
+      const existingAdmin = await database.query(
+        'SELECT id FROM admins WHERE email = $1',
+        [request.email]
+      );
+
+      let newAdmin;
+      if (existingAdmin.rows.length > 0) {
+        // Admin already exists, just use existing one
+        newAdmin = existingAdmin.rows[0];
+        logger.info('Admin already exists, using existing account', { email: request.email });
+      } else {
+        // Create new admin account
+        const adminResult = await database.query(`
+          INSERT INTO admins (email, password_hash, name, role, is_active, created_at, updated_at)
+          VALUES ($1, $2, $3, 'admin', true, NOW(), NOW())
+          RETURNING id, email, name, role
+        `, [request.email, request.password_hash, request.name]);
+        newAdmin = adminResult.rows[0];
+      }
+
+      // Get the super admin's UUID for reviewed_by field
+      let reviewedBy = null;
+      try {
+        const superAdminResult = await database.query(
+          'SELECT id FROM admins WHERE email = $1',
+          ['nsmnavarasan@gmail.com']
+        );
+        if (superAdminResult.rows.length > 0) {
+          reviewedBy = superAdminResult.rows[0].id;
+        }
+      } catch (error) {
+        logger.warn('Could not find super admin for reviewed_by field', error);
+      }
+
+      // Update request status
+      await database.query(
+        'UPDATE admin_requests SET status = $1, reviewed_at = NOW(), reviewed_by = $2 WHERE id = $3',
+        ['approved', reviewedBy, decoded.requestId]
+      );
+
+      // Send welcome email to new admin
+      try {
+        await emailService.send({
+          to: request.email,
+          subject: '✅ Admin Access Approved - AuthJet',
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+              <h2 style="color: #16a34a;">🎉 Admin Access Approved!</h2>
+              
+              <div style="background: #f0fdf4; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                <p><strong>Congratulations ${request.name}!</strong></p>
+                <p>Your admin access request has been approved. You can now login to the admin dashboard.</p>
+              </div>
+
+              <div style="background: #f9fafb; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                <h3>Login Details:</h3>
+                <p><strong>Email:</strong> ${request.email}</p>
+                <p><strong>Admin Dashboard:</strong> <a href="http://localhost:3000/admin/login">Login Here</a></p>
+              </div>
+
+              <div style="background: #fef3c7; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                <p><strong>⚠️ Important:</strong> Please keep your login credentials secure and use them responsibly.</p>
+              </div>
+            </div>
+          `
+        });
+      } catch (emailError) {
+        logger.error('Failed to send welcome email to new admin', emailError);
+      }
+
+      logger.info('Admin request approved', {
+        requestId: decoded.requestId,
+        newAdminId: newAdmin.id,
+        email: request.email
+      });
+
+      res.send(`
+        <html>
+          <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px;">
+            <div style="text-align: center; color: #16a34a;">
+              <h2>✅ Admin Request Approved!</h2>
+              <div style="background: #f0fdf4; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                <p><strong>Admin account created successfully for:</strong></p>
+                <p><strong>Name:</strong> ${request.name}</p>
+                <p><strong>Email:</strong> ${request.email}</p>
+              </div>
+              <p>The user has been notified and can now access the admin dashboard.</p>
+            </div>
+          </body>
+        </html>
+      `);
+
+    } catch (error) {
+      logger.error('Admin approval error:', error);
+      res.status(500).send(`
+        <html>
+          <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px;">
+            <div style="text-align: center; color: #dc2626;">
+              <h2>❌ Approval Failed</h2>
+              <p>An error occurred while processing the approval.</p>
+              <p>Please try again or contact support.</p>
+            </div>
+          </body>
+        </html>
+      `);
+    }
+  }
+
+  async rejectAdminRequest(req, res, next) {
+    try {
+      const { token } = req.params;
+
+      // Verify and decode token
+      let decoded;
+      try {
+        decoded = jwt.verify(token, process.env.JWT_SECRET);
+      } catch (error) {
+        return res.status(400).send(`
+          <html>
+            <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px;">
+              <div style="text-align: center; color: #dc2626;">
+                <h2>❌ Invalid or Expired Token</h2>
+                <p>This rejection link is invalid or has expired.</p>
+              </div>
+            </body>
+          </html>
+        `);
+      }
+
+      if (decoded.action !== 'reject') {
+        return res.status(400).send('<h2>Invalid action</h2>');
+      }
+
+      // Get the admin request
+      const requestResult = await database.query(
+        'SELECT * FROM admin_requests WHERE id = $1 AND status = $2',
+        [decoded.requestId, 'pending']
+      );
+
+      if (requestResult.rows.length === 0) {
+        return res.status(404).send(`
+          <html>
+            <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px;">
+              <div style="text-align: center; color: #dc2626;">
+                <h2>❌ Request Not Found</h2>
+                <p>This admin request was not found or has already been processed.</p>
+              </div>
+            </body>
+          </html>
+        `);
+      }
+
+      const request = requestResult.rows[0];
+
+      // Get the super admin's UUID for reviewed_by field
+      let reviewedBy = null;
+      try {
+        const superAdminResult = await database.query(
+          'SELECT id FROM admins WHERE email = $1',
+          ['nsmnavarasan@gmail.com']
+        );
+        if (superAdminResult.rows.length > 0) {
+          reviewedBy = superAdminResult.rows[0].id;
+        }
+      } catch (error) {
+        logger.warn('Could not find super admin for reviewed_by field', error);
+      }
+
+      // Update request status to rejected
+      await database.query(
+        'UPDATE admin_requests SET status = $1, reviewed_at = NOW(), reviewed_by = $2 WHERE id = $3',
+        ['rejected', reviewedBy, decoded.requestId]
+      );
+
+      // Send rejection email
+      try {
+        await emailService.send({
+          to: request.email,
+          subject: '❌ Admin Access Request Rejected - AuthJet',
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+              <h2 style="color: #dc2626;">❌ Admin Access Request Rejected</h2>
+              
+              <div style="background: #fef2f2; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                <p><strong>Dear ${request.name},</strong></p>
+                <p>Your admin access request has been reviewed and unfortunately cannot be approved at this time.</p>
+              </div>
+
+              <div style="background: #f9fafb; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                <p>If you believe this was an error or would like to discuss your request further, please contact the system administrator.</p>
+              </div>
+            </div>
+          `
+        });
+      } catch (emailError) {
+        logger.error('Failed to send rejection email', emailError);
+      }
+
+      logger.info('Admin request rejected', {
+        requestId: decoded.requestId,
+        email: request.email
+      });
+
+      res.send(`
+        <html>
+          <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px;">
+            <div style="text-align: center; color: #dc2626;">
+              <h2>❌ Admin Request Rejected</h2>
+              <div style="background: #fef2f2; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                <p><strong>Request rejected for:</strong></p>
+                <p><strong>Name:</strong> ${request.name}</p>
+                <p><strong>Email:</strong> ${request.email}</p>
+              </div>
+              <p>The user has been notified of the decision.</p>
+            </div>
+          </body>
+        </html>
+      `);
+
+    } catch (error) {
+      logger.error('Admin rejection error:', error);
+      res.status(500).send(`
+        <html>
+          <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px;">
+            <div style="text-align: center; color: #dc2626;">
+              <h2>❌ Rejection Failed</h2>
+              <p>An error occurred while processing the rejection.</p>
+            </div>
+          </body>
+        </html>
+      `);
+    }
+  }
+
   async getClientApplications(req, res, next) {
     try {
-      res.json({ message: 'Get client applications endpoint - to be implemented' });
+      const { clientId } = req.params;
+      const result = await database.query(
+        'SELECT * FROM client_applications WHERE client_id = $1 ORDER BY created_at DESC',
+        [clientId]
+      );
+      res.json({
+        success: true,
+        applications: result.rows
+      });
     } catch (error) {
+      logger.error('Get client applications error:', error);
       next(error);
     }
   }
 
+  async getClientUsers(req, res, next) {
+    try {
+      const { clientId } = req.params;
+      const { limit = 50, offset = 0 } = req.query;
+
+      const query = `
+        SELECT u.*, COUNT(s.id) as session_count
+        FROM users u
+        LEFT JOIN sessions s ON u.id = s.user_id AND s.expires_at > NOW() AND s.revoked = false
+        WHERE u.client_id = $1
+        GROUP BY u.id
+        ORDER BY u.created_at DESC
+        LIMIT $2 OFFSET $3
+      `;
+
+      const countQuery = 'SELECT COUNT(*) FROM users WHERE client_id = $1';
+
+      const [usersResult, countResult] = await Promise.all([
+        database.query(query, [clientId, limit, offset]),
+        database.query(countQuery, [clientId])
+      ]);
+
+      res.json({
+        success: true,
+        users: usersResult.rows,
+        total: parseInt(countResult.rows[0].count)
+      });
+    } catch (error) {
+      logger.error('Get client users error:', error);
+      next(error);
+    }
+  }
+
+  // Placeholder methods
   async getApplication(req, res, next) {
     try {
       res.json({ message: 'Get application endpoint - to be implemented' });
@@ -790,10 +1110,8 @@ class AdminController {
     }
   }
 
-  // Additional methods for analytics, system health, etc. would go here
   async getAnalyticsOverview(req, res, next) {
     try {
-      // Implementation for analytics overview
       res.json({ message: 'Analytics overview endpoint - to be implemented' });
     } catch (error) {
       next(error);
@@ -803,7 +1121,7 @@ class AdminController {
   async getSystemHealth(req, res, next) {
     try {
       // Implementation for system health check
-      res.json({ 
+      res.json({
         status: 'healthy',
         timestamp: new Date().toISOString(),
         database: 'connected'

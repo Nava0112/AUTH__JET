@@ -15,45 +15,47 @@ const UserLogin = () => {
   // Fetch application data from backend
   useEffect(() => {
     // Replace the fetchAppData function with this:
-      const fetchAppData = async () => {
-        if (!clientId || !applicationId) {
-          setError('Missing client_id or application_id');
-          setLoading(false);
-          return;
-        }
+    const fetchAppData = async () => {
+      if (!clientId || !applicationId) {
+        setError('Missing client_id or application_id');
+        setLoading(false);
+        return;
+      }
 
-        try {
-          const response = await fetch(
-            `http://localhost:8000/api/user/applications/${applicationId}?client_id=${clientId}`
-          );
+      try {
+        const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+        const response = await fetch(
+          `${apiUrl}/api/user/applications/${applicationId}?client_id=${clientId}`
+        );
 
-          if (response.ok) {
-            const data = await response.json();
-            setAppData(data.application);
-          } else {
-            // If API fails, use fallback data
-            console.warn('API returned error, using fallback data');
-            setAppData({
-              name: searchParams.get('app_name') || 'Application',
-              description: 'Secure authentication service',
-              auth_mode: 'basic'
-            });
-          }
-        } catch (err) {
-          // If network error, use fallback data
-          console.warn('Network error, using fallback data:', err.message);
+        if (response.ok) {
+          const data = await response.json();
+          setAppData(data.application);
+        } else {
+          // If API fails, use fallback data
+          console.warn('API returned error, using fallback data');
           setAppData({
             name: searchParams.get('app_name') || 'Application',
-            description: 'Secure authentication service', 
+            description: 'Secure authentication service',
             auth_mode: 'basic'
           });
-        } finally {
-          setLoading(false);
         }
-      };
+      } catch (err) {
+        // If network error, use fallback data
+        console.warn('Network error, using fallback data:', err.message);
+        setAppData({
+          name: searchParams.get('app_name') || 'Application',
+          description: 'Secure authentication service',
+          auth_mode: 'basic'
+        });
+      } finally {
+        setLoading(false);
+      }
+    };
 
     fetchAppData();
-  }, [clientId, applicationId]);
+  }, [clientId, applicationId, searchParams, appName]);
+
 
   // Show loading state
   if (loading) {
@@ -117,14 +119,17 @@ const UserLogin = () => {
 
     try {
       const endpoint = isLogin ? '/api/user/login' : '/api/user/register';
-      const response = await fetch(`http://localhost:8000${endpoint}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      credentials: 'include', // 🆕 ADD THIS for cookies
-      body: JSON.stringify(data)
-});
+      const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+
+      const response = await fetch(`${apiUrl}${endpoint}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Application-ID': applicationId, // 🆕 Send Application ID in Header
+        },
+        credentials: 'include',
+        body: JSON.stringify(data)
+      });
 
       const result = await response.json();
 
@@ -136,29 +141,17 @@ const UserLogin = () => {
 
         // 🎯 FIXED: Always redirect back to client application
         if (redirectUri) {
-          // Redirect to client application with tokens as URL parameters
-          const tokenParams = new URLSearchParams({
-            access_token: result.access_token,
-            refresh_token: result.refresh_token,
-            token_type: result.token_type,
-            expires_in: result.expires_in,
-            user_id: result.user.id,
-            user_email: result.user.email,
-            user_role: result.user.role
-          });
+          // Use URL fragments for better security instead of query params
+          const redirectUrl = new URL(redirectUri);
+          redirectUrl.hash = `access_token=${result.access_token}&refresh_token=${result.refresh_token}&token_type=${result.token_type}&expires_in=${result.expires_in}&user_id=${result.user.id}&user_email=${result.user.email}`;
           
-          // Use the redirect_uri from parameters
-          window.location.href = `${redirectUri}?${tokenParams.toString()}`;
+          window.location.href = redirectUrl.toString();
         } else {
-          // If no redirect_uri provided, use the application's main_page_url
+          // If no redirect_uri provided, check for main_page_url
           if (appData && appData.main_page_url) {
-            const tokenParams = new URLSearchParams({
-              access_token: result.access_token,
-              refresh_token: result.refresh_token,
-              token_type: result.token_type,
-              expires_in: result.expires_in
-            });
-            window.location.href = `${appData.main_page_url}?${tokenParams.toString()}`;
+            const redirectUrl = new URL(appData.main_page_url);
+            redirectUrl.hash = `access_token=${result.access_token}&refresh_token=${result.refresh_token}&token_type=${result.token_type}&expires_in=${result.expires_in}`;
+            window.location.href = redirectUrl.toString();
           } else {
             // Fallback: go to profile page
             window.location.href = '/user/profile';
@@ -191,17 +184,17 @@ const UserLogin = () => {
               </span>
             </div>
           )}
-          
+
           <h1 className="text-3xl font-bold text-gray-900 mb-2">
             {application.name}
           </h1>
-          
+
           {application.description && (
             <p className="text-gray-600 text-lg mb-4 max-w-sm mx-auto leading-relaxed">
               {application.description}
             </p>
           )}
-          
+
           <div className="inline-flex items-center bg-white px-3 py-1 rounded-full text-sm text-gray-600 border shadow-sm mb-2">
             <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
             Secure JWT Authentication
@@ -215,22 +208,20 @@ const UserLogin = () => {
               <button
                 type="button"
                 onClick={() => setIsLogin(true)}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                  isLogin 
-                    ? 'bg-white text-gray-900 shadow-sm' 
-                    : 'text-gray-500 hover:text-gray-700'
-                }`}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${isLogin
+                  ? 'bg-white text-gray-900 shadow-sm'
+                  : 'text-gray-500 hover:text-gray-700'
+                  }`}
               >
                 Sign In
               </button>
               <button
                 type="button"
                 onClick={() => setIsLogin(false)}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                  !isLogin 
-                    ? 'bg-white text-gray-900 shadow-sm' 
-                    : 'text-gray-500 hover:text-gray-700'
-                }`}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${!isLogin
+                  ? 'bg-white text-gray-900 shadow-sm'
+                  : 'text-gray-500 hover:text-gray-700'
+                  }`}
               >
                 Sign Up
               </button>
@@ -334,7 +325,7 @@ const UserLogin = () => {
 
         {/* Debug info & Back link */}
         <div className="text-center space-y-3">
-          
+
           <a href="/" className="inline-block text-indigo-600 hover:text-indigo-500 text-sm bg-white px-4 py-2 rounded-lg border transition-colors">
             ← Back to AuthJet Portal
           </a>
