@@ -180,13 +180,7 @@ router.post('/:user_id/request-role',
   userAuthController.requestRoleUpgrade.bind(userAuthController)
 );
 
-/**
- * Get Role Requests
- * Requires: User JWT token
- */
-router.get('/:user_id/role-requests',
-  authenticateUser,
-  userAuthController.getRoleRequests.bind(userAuthController)
-);
+// Role request tracking is now handled via the user profile and direct table fields.
+
 
 module.exports = router;

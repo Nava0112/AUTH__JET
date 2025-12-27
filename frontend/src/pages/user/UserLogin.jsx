@@ -25,7 +25,7 @@ const UserLogin = () => {
       try {
         const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000';
         const response = await fetch(
-          `${apiUrl}/api/user/applications/${applicationId}?client_id=${clientId}`
+          `${apiUrl}/api/user/applications/${applicationId}`
         );
 
         if (response.ok) {
@@ -54,7 +54,7 @@ const UserLogin = () => {
     };
 
     fetchAppData();
-  }, [clientId, applicationId, searchParams, appName]);
+  }, [clientId, applicationId, searchParams]);
 
 
   // Show loading state
@@ -144,7 +144,7 @@ const UserLogin = () => {
           // Use URL fragments for better security instead of query params
           const redirectUrl = new URL(redirectUri);
           redirectUrl.hash = `access_token=${result.access_token}&refresh_token=${result.refresh_token}&token_type=${result.token_type}&expires_in=${result.expires_in}&user_id=${result.user.id}&user_email=${result.user.email}`;
-          
+
           window.location.href = redirectUrl.toString();
         } else {
           // If no redirect_uri provided, check for main_page_url

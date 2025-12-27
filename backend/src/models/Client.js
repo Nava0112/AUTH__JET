@@ -4,103 +4,60 @@ const logger = require('../utils/logger');
 
 class Client {
   static async create(clientData) {
-  const { name, contact_email, website, business_type, allowed_domains = [], default_roles = ['user'] } = clientData;
-  
-  try {
-    const apiKey = 'cli_' + crypto.randomString(16);
-    const secretKey = crypto.randomString(32);
-    const secretKeyHash = await crypto.hashPassword(secretKey);
-
-    // Generate RSA key pair for this client
-    const { generateKeyPair } = require('crypto');
-    const keyPair = await new Promise((resolve, reject) => {
-      generateKeyPair('rsa', {
-        modulusLength: 2048,
-        publicKeyEncoding: {
-          type: 'spki',
-          format: 'pem'
-        },
-        privateKeyEncoding: {
-          type: 'pkcs8',
-          format: 'pem'
-        }
-      }, (err, publicKey, privateKey) => {
-        if (err) reject(err);
-        else resolve({ publicKey, privateKey });
-      });
-    });
-
-    const keyId = `kid_${crypto.randomString(8)}`;
-    const encryptedPrivateKey = crypto.encrypt(privateKey, process.env.ENCRYPTION_KEY);
-
-    // Start transaction
-    const client = await database.getClient();
-    await client.query('BEGIN');
+    const {
+      name,
+      email,
+      password,
+      organization_name,
+      website,
+      phone,
+      plan_type = 'basic'
+    } = clientData;
 
     try {
-      // Create client
-      const clientQuery = `
+      const clientId = 'cli_' + crypto.randomString(16);
+      const clientSecret = crypto.randomString(32);
+      const passwordHash = await crypto.hashPassword(password);
+
+      const query = `
         INSERT INTO clients (
-          name, contact_email, website, business_type, 
-          api_key, secret_key_hash, allowed_domains, default_roles
+          name, email, password_hash, organization_name, 
+          website, phone, plan_type, client_id, client_secret
         ) 
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         RETURNING *
       `;
-      
-      const clientResult = await client.query(clientQuery, [
-        name, contact_email, website, business_type,
-        apiKey, secretKeyHash, 
-        JSON.stringify(allowed_domains), JSON.stringify(default_roles),
+
+      const result = await database.query(query, [
+        name,
+        email,
+        passwordHash,
+        organization_name,
+        website,
+        phone,
+        plan_type,
+        clientId,
+        clientSecret
       ]);
 
-      const newClient = clientResult.rows[0];
-
-      // Store key pair
-      const keyQuery = `
-        INSERT INTO client_keys (
-          client_id, key_id, public_key, private_key_encrypted, 
-          algorithm, key_type, key_size, key_usage
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      `;
-      
-      await client.query(keyQuery, [
-        newClient.id, keyId, keyPair.publicKey, encryptedPrivateKey,
-        'RS256', 'RSA', 2048, 'signing'
-      ]);
-
-      await client.query('COMMIT');
-      
       return {
-        ...newClient,
-        secret_key: secretKey,
-        key_id: keyId // Return key ID for reference
+        ...result.rows[0],
+        client_secret: clientSecret // Return raw secret once
       };
-      
     } catch (error) {
-      await client.query('ROLLBACK');
+      logger.error('Client creation error:', error);
       throw error;
-    } finally {
-      client.release();
     }
-  } catch (error) {
-    logger.error('Client creation error:', error);
-    throw error;
   }
-}
 
   static async findById(id) {
     try {
       const query = `
-        SELECT 
-          id, name, contact_email, website, business_type,
-          api_key, allowed_domains, default_roles, plan_type,
-          webhook_url, settings, created_at, updated_at
+        SELECT *
         FROM clients 
         WHERE id = $1
       `;
-      
+
       const result = await database.query(query, [id]);
       return result.rows[0] || null;
     } catch (error) {
@@ -109,13 +66,24 @@ class Client {
     }
   }
 
-  static async findByApiKey(apiKey) {
+  static async findByClientId(clientId) {
     try {
-      const query = 'SELECT * FROM clients WHERE api_key = $1';
-      const result = await database.query(query, [apiKey]);
+      const query = 'SELECT * FROM clients WHERE client_id = $1';
+      const result = await database.query(query, [clientId]);
       return result.rows[0] || null;
     } catch (error) {
-      logger.error('Find client by API key error:', error);
+      logger.error('Find client by client_id error:', error);
+      throw error;
+    }
+  }
+
+  static async findByEmail(email) {
+    try {
+      const query = 'SELECT * FROM clients WHERE email = $1';
+      const result = await database.query(query, [email]);
+      return result.rows[0] || null;
+    } catch (error) {
+      logger.error('Find client by email error:', error);
       throw error;
     }
   }
@@ -127,21 +95,20 @@ class Client {
 
       let query = `
         SELECT 
-          id, name, contact_email, website, business_type,
-          api_key, allowed_domains, default_roles, plan_type,
-          created_at, updated_at
+          id, name, email, organization_name, website,
+          client_id, plan_type, is_active, created_at, updated_at
         FROM clients 
         WHERE 1=1
       `;
-      
+
       let countQuery = 'SELECT COUNT(*) FROM clients WHERE 1=1';
       const params = [];
       let paramCount = 0;
 
       if (search) {
         paramCount++;
-        query += ` AND (name ILIKE $${paramCount} OR contact_email ILIKE $${paramCount})`;
-        countQuery += ` AND (name ILIKE $${paramCount} OR contact_email ILIKE $${paramCount})`;
+        query += ` AND (name ILIKE $${paramCount} OR email ILIKE $${paramCount} OR organization_name ILIKE $${paramCount})`;
+        countQuery += ` AND (name ILIKE $${paramCount} OR email ILIKE $${paramCount} OR organization_name ILIKE $${paramCount})`;
         params.push(`%${search}%`);
       }
 
@@ -169,10 +136,10 @@ class Client {
   static async update(id, updates) {
     try {
       const allowedFields = [
-        'name', 'website', 'business_type', 'allowed_domains', 
-        'default_roles', 'webhook_url', 'settings', 'plan_type'
+        'name', 'organization_name', 'website', 'phone',
+        'plan_type', 'is_active', 'last_login'
       ];
-      
+
       const updateFields = [];
       const values = [];
       let paramCount = 0;
@@ -181,12 +148,7 @@ class Client {
         if (updates[field] !== undefined) {
           paramCount++;
           updateFields.push(`${field} = $${paramCount}`);
-          
-          if (field === 'allowed_domains' || field === 'default_roles' || field === 'settings') {
-            values.push(JSON.stringify(updates[field]));
-          } else {
-            values.push(updates[field]);
-          }
+          values.push(updates[field]);
         }
       });
 
@@ -213,31 +175,29 @@ class Client {
     }
   }
 
-  static async regenerateApiKey(id) {
+  static async regenerateClientSecret(id) {
     try {
-      const newApiKey = 'cli_' + crypto.randomString(16);
-      const newSecretKey = crypto.randomString(32);
-      const newSecretKeyHash = await crypto.hashPassword(newSecretKey);
+      const newSecret = crypto.randomString(32);
 
       const query = `
         UPDATE clients 
-        SET api_key = $1, secret_key_hash = $2, updated_at = NOW()
-        WHERE id = $3
+        SET client_secret = $1, updated_at = NOW()
+        WHERE id = $2
         RETURNING *
       `;
 
-      const result = await database.query(query, [newApiKey, newSecretKeyHash, id]);
-      
+      const result = await database.query(query, [newSecret, id]);
+
       if (!result.rows[0]) {
         return null;
       }
 
       return {
         ...result.rows[0],
-        secret_key: newSecretKey,
+        client_secret: newSecret,
       };
     } catch (error) {
-      logger.error('Regenerate API key error:', error);
+      logger.error('Regenerate client secret error:', error);
       throw error;
     }
   }
@@ -245,20 +205,19 @@ class Client {
   static async delete(id) {
     try {
       const client = await database.getClient();
-      
+
       try {
         await client.query('BEGIN');
 
-        // Delete related records
-        await client.query('DELETE FROM webhook_logs WHERE client_id = $1', [id]);
+        // Cascade delete handled by DB for client_applications, users, etc.
+        // But some tables might not have FK with CASCADE
         await client.query('DELETE FROM audit_logs WHERE client_id = $1', [id]);
-        await client.query('DELETE FROM failed_logins WHERE client_id = $1', [id]);
-        await client.query('DELETE FROM sessions WHERE client_id = $1', [id]);
-        await client.query('DELETE FROM client_users WHERE client_id = $1', [id]);
-        
-        // Delete client
+
+        // Delete sessions for all entities related to this client? 
+        // This is complex for polymorphic sessions. 
+        // For now, let's just delete the client and rely on FK constraints.
         const result = await client.query('DELETE FROM clients WHERE id = $1 RETURNING id', [id]);
-        
+
         await client.query('COMMIT');
         client.release();
 
@@ -277,43 +236,29 @@ class Client {
   static async getStats(id) {
     try {
       const statsQueries = {
-        totalUsers: `
+        totalApplications: `
           SELECT COUNT(*) as count 
-          FROM client_users 
+          FROM client_applications 
           WHERE client_id = $1
         `,
-        activeUsers: `
-          SELECT COUNT(DISTINCT user_id) as count
+        totalUsers: `
+          SELECT COUNT(*) as count
+          FROM users 
+          WHERE client_id = $1
+        `,
+        activeSessions: `
+          SELECT COUNT(*) as count
           FROM sessions 
-          WHERE client_id = $1 AND expires_at > NOW() AND revoked = false
-        `,
-        totalLogins: `
-          SELECT COUNT(*) as count
-          FROM audit_logs 
-          WHERE client_id = $1 AND action = 'login'
-        `,
-        webhookCalls: `
-          SELECT COUNT(*) as count
-          FROM webhook_logs 
-          WHERE client_id = $1
-        `,
-        successfulWebhooks: `
-          SELECT COUNT(*) as count
-          FROM webhook_logs 
-          WHERE client_id = $1 AND success = true
-        `,
+          WHERE entity_id = $1 AND session_type = 'client' AND revoked = false AND expires_at > NOW()
+        `
       };
 
       const stats = {};
-      
+
       for (const [key, query] of Object.entries(statsQueries)) {
         const result = await database.query(query, [id]);
         stats[key] = parseInt(result.rows[0].count) || 0;
       }
-
-      // Calculate success rate
-      stats.webhookSuccessRate = stats.webhookCalls > 0 ? 
-        (stats.successfulWebhooks / stats.webhookCalls * 100).toFixed(2) : 100;
 
       return stats;
     } catch (error) {

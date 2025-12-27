@@ -1,4 +1,4 @@
-const bcrypt = require('bcryptjs');
+const crypto = require('../utils/crypto');
 const jwt = require('jsonwebtoken');
 const database = require('../utils/database');
 const logger = require('../utils/logger');
@@ -8,7 +8,7 @@ class OAuthController {
   async authorize(req, res, next) {
     try {
       const { client_id, redirect_uri, state, response_type = 'code' } = req.query;
-      
+
       if (!client_id || !redirect_uri) {
         return res.status(400).json({
           error: 'invalid_request',
@@ -55,9 +55,9 @@ class OAuthController {
 
     } catch (error) {
       logger.error('OAuth authorize error:', error);
-      res.status(500).json({ 
+      res.status(500).json({
         error: 'server_error',
-        error_description: 'Internal server error' 
+        error_description: 'Internal server error'
       });
     }
   }
@@ -66,7 +66,7 @@ class OAuthController {
   async register(req, res, next) {
     try {
       const { email, password, name, client_id, redirect_uri, state } = req.body;
-      
+
       // Validation
       if (!email || !password || !name || !client_id) {
         return res.status(400).json({
@@ -96,7 +96,7 @@ class OAuthController {
       }
 
       const application = app.rows[0];
-      
+
       // Debug logging
       console.log('Application found:', application);
 
@@ -114,8 +114,8 @@ class OAuthController {
       }
 
       // Hash password and create user
-      const passwordHash = await bcrypt.hash(password, 12);
-      
+      const passwordHash = await crypto.hashPassword(password);
+
       const result = await database.query(`
         INSERT INTO users (
           client_id, application_id, email, password_hash, name, role, is_active
@@ -164,17 +164,17 @@ class OAuthController {
         [refreshToken, user.id]
       );
 
-      logger.info('OAuth user registration successful', { 
-        userId: user.id, 
-        email: user.email, 
-        applicationId: client_id 
+      logger.info('OAuth user registration successful', {
+        userId: user.id,
+        email: user.email,
+        applicationId: client_id
       });
 
       // Send webhook notification if configured
       if (application.webhook_url) {
         try {
           const fetch = require('node-fetch');
-          
+
           await fetch(application.webhook_url, {
             method: 'POST',
             headers: {
@@ -196,22 +196,22 @@ class OAuthController {
             })
           });
 
-          logger.info('Webhook notification sent', { 
-            event: 'user.registered', 
-            url: application.webhook_url 
+          logger.info('Webhook notification sent', {
+            event: 'user.registered',
+            url: application.webhook_url
           });
         } catch (webhookError) {
-          logger.error('Webhook notification failed', { 
-            event: 'user.registered', 
-            url: application.webhook_url, 
-            error: webhookError.message 
+          logger.error('Webhook notification failed', {
+            event: 'user.registered',
+            url: application.webhook_url,
+            error: webhookError.message
           });
         }
       }
 
       // Build redirect URL with tokens
       const redirectUrl = `${redirect_uri || application.redirect_url}?access_token=${accessToken}&refresh_token=${refreshToken}&token_type=Bearer&expires_in=3600&state=${state || ''}`;
-      
+
       res.status(201).json({
         success: true,
         message: 'User registered successfully',
@@ -244,7 +244,7 @@ class OAuthController {
   async login(req, res, next) {
     try {
       const { email, password, client_id, redirect_uri, state } = req.body;
-      
+
       if (!email || !password || !client_id) {
         return res.status(400).json({
           error: 'invalid_request',
@@ -290,8 +290,8 @@ class OAuthController {
       }
 
       // Check password
-      const validPassword = await bcrypt.compare(password, user.password_hash);
-      
+      const validPassword = await crypto.comparePassword(password, user.password_hash);
+
       if (!validPassword) {
         return res.status(400).json({
           error: 'invalid_grant',
@@ -329,17 +329,17 @@ class OAuthController {
         [refreshToken, user.id]
       );
 
-      logger.info('OAuth user login successful', { 
-        userId: user.id, 
-        email: user.email, 
-        applicationId: client_id 
+      logger.info('OAuth user login successful', {
+        userId: user.id,
+        email: user.email,
+        applicationId: client_id
       });
 
       // Send webhook notification
       if (application.webhook_url) {
         try {
           const fetch = require('node-fetch');
-          
+
           await fetch(application.webhook_url, {
             method: 'POST',
             headers: {
@@ -361,22 +361,22 @@ class OAuthController {
             })
           });
 
-          logger.info('Webhook notification sent', { 
-            event: 'user.login', 
-            url: application.webhook_url 
+          logger.info('Webhook notification sent', {
+            event: 'user.login',
+            url: application.webhook_url
           });
         } catch (webhookError) {
-          logger.error('Webhook notification failed', { 
-            event: 'user.login', 
-            url: application.webhook_url, 
-            error: webhookError.message 
+          logger.error('Webhook notification failed', {
+            event: 'user.login',
+            url: application.webhook_url,
+            error: webhookError.message
           });
         }
       }
 
       // Build redirect URL with tokens
       const redirectUrl = `${redirect_uri || application.redirect_url}?access_token=${accessToken}&refresh_token=${refreshToken}&token_type=Bearer&expires_in=3600&state=${state || ''}`;
-      
+
       res.json({
         success: true,
         message: 'Login successful',
@@ -418,10 +418,10 @@ class OAuthController {
       }
 
       const token = authHeader.substring(7);
-      
+
       try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        
+
         if (decoded.type !== 'access') {
           throw new Error('Invalid token type');
         }
@@ -489,11 +489,11 @@ class OAuthController {
           });
         }
 
-        logger.info('Role request submitted', { 
-          userId: user.id, 
+        logger.info('Role request submitted', {
+          userId: user.id,
           currentRole: user.role,
           requestedRole: requested_role,
-          applicationId: applicationId 
+          applicationId: applicationId
         });
 
         res.json({
@@ -531,10 +531,10 @@ class OAuthController {
       }
 
       const token = authHeader.substring(7);
-      
+
       try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        
+
         if (decoded.type !== 'access') {
           throw new Error('Invalid token type');
         }
@@ -592,7 +592,7 @@ class OAuthController {
   async sendWebhookNotification(webhookUrl, event, data) {
     try {
       const fetch = require('node-fetch');
-      
+
       await fetch(webhookUrl, {
         method: 'POST',
         headers: {
@@ -605,16 +605,16 @@ class OAuthController {
         })
       });
 
-      logger.info('Webhook notification sent', { 
-        event: event, 
-        url: webhookUrl 
+      logger.info('Webhook notification sent', {
+        event: event,
+        url: webhookUrl
       });
 
     } catch (error) {
-      logger.error('Webhook notification failed', { 
-        event: event, 
-        url: webhookUrl, 
-        error: error.message 
+      logger.error('Webhook notification failed', {
+        event: event,
+        url: webhookUrl,
+        error: error.message
       });
     }
   }
@@ -623,7 +623,7 @@ class OAuthController {
   async sendRoleRequestWebhook(webhookUrl, data) {
     try {
       const fetch = require('node-fetch');
-      
+
       await fetch(webhookUrl, {
         method: 'POST',
         headers: {
@@ -636,9 +636,9 @@ class OAuthController {
       logger.info('Role request webhook sent', { url: webhookUrl });
 
     } catch (error) {
-      logger.error('Role request webhook failed', { 
-        url: webhookUrl, 
-        error: error.message 
+      logger.error('Role request webhook failed', {
+        url: webhookUrl,
+        error: error.message
       });
     }
   }

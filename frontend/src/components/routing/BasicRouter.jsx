@@ -15,6 +15,7 @@ import UserRegister from '../../pages/user/UserRegister';
 import VerifyEmail from '../../pages/user/VerifyEmail';
 import UserProfile from '../../pages/user/UserProfile';
 import RoleManagement from '../../pages/user/RoleManagement';
+import ForgotPassword from '../../pages/ForgotPassword';
 
 // Simple fallback components
 const ComingSoon = ({ title = "Coming Soon" }) => (
@@ -52,10 +53,10 @@ const NotFound = () => (
           Go to Client Login
         </button>
         <button
-          onClick={() => window.location.href = '/user/login?client_id=3&application_id=12'}
+          onClick={() => window.location.href = '/user/login?client_id=cli_demo1234567890ab&application_id=1'}
           className="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 block w-full"
         >
-          Test Dark Dragon User Login
+          Test User Login
         </button>
       </div>
     </div>
@@ -67,37 +68,39 @@ const BasicRouter = () => {
     <Routes>
       {/* Base route - Client Login */}
       <Route path="/" element={<SimpleClientLogin />} />
-      
+
       {/* Client Routes (Organizations using AuthJet) */}
       <Route path="/client/login" element={<SimpleClientLogin />} />
       <Route path="/client/register" element={<WorkingClientRegister />} />
       <Route path="/client/dashboard" element={<WorkingClientDashboard />} />
       <Route path="/client/create-application" element={<CreateApplication />} />
-      
+      <Route path="/client/forgot-password" element={<ForgotPassword />} />
+
       {/* Admin Routes (AuthJet Platform Admins) */}
       <Route path="/admin/login" element={<WorkingAdminLogin />} />
       <Route path="/admin/register" element={<WorkingAdminRegister />} />
       <Route path="/admin/dashboard" element={<WorkingAdminDashboard />} />
-      
+      <Route path="/admin/forgot-password" element={<ForgotPassword />} />
+
       {/* 👇 NEW: User Routes (End-users of your clients' apps) */}
       <Route path="/user/login" element={<UserLogin />} />
       <Route path="/user/register" element={<UserRegister />} />
       <Route path="/user/verify-email" element={<VerifyEmail />} />
       <Route path="/user/profile" element={<UserProfile />} />
       <Route path="/user/roles" element={<RoleManagement />} />
-      
+
       {/* Setup and Status Pages */}
       <Route path="/setup" element={<SetupStatus />} />
       <Route path="/status" element={<SetupStatus />} />
-      
+
       {/* Landing Page */}
       <Route path="/landing" element={<ComingSoon title="Landing Page" />} />
-      
+
       {/* Legacy Routes */}
       <Route path="/login" element={<Navigate to="/" replace />} />
       <Route path="/register" element={<Navigate to="/client/register" replace />} />
       <Route path="/dashboard" element={<Navigate to="/client/dashboard" replace />} />
-      
+
       {/* 404 Route */}
       <Route path="*" element={<NotFound />} />
     </Routes>

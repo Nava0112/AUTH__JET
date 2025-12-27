@@ -3,28 +3,39 @@ const crypto = require('../utils/crypto');
 const logger = require('../utils/logger');
 
 class Session {
+  /**
+   * Create a new session
+   * @param {Object} sessionData - { session_type, entity_id, refresh_token, expires_at, ip_address, user_agent }
+   */
   static async create(sessionData) {
-    const { user_id, client_id, refresh_token, device_info = {}, ip_address } = sessionData;
-    
+    const {
+      session_type,
+      entity_id,
+      refresh_token,
+      expires_at,
+      ip_address,
+      user_agent
+    } = sessionData;
+
     try {
-      const refreshTokenHash = crypto.hashToken(refresh_token);
-      const expiresAt = new Date(Date.now() + (7 * 24 * 60 * 60 * 1000)); // 7 days
+      // Default expiry if not provided (7 days)
+      const expiry = expires_at || new Date(Date.now() + (7 * 24 * 60 * 60 * 1000));
 
       const query = `
         INSERT INTO sessions (
-          user_id, client_id, refresh_token_hash, device_info, ip_address, expires_at
+          session_type, entity_id, refresh_token, expires_at, ip_address, user_agent
         ) 
         VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING *
       `;
-      
+
       const result = await database.query(query, [
-        user_id,
-        client_id,
-        refreshTokenHash,
-        JSON.stringify(device_info),
+        session_type,
+        entity_id,
+        refresh_token,
+        expiry,
         ip_address,
-        expiresAt,
+        user_agent
       ]);
 
       return result.rows[0];
@@ -34,19 +45,19 @@ class Session {
     }
   }
 
+  /**
+   * Find an active session by refresh token
+   * @param {string} refreshToken 
+   */
   static async findByRefreshToken(refreshToken) {
     try {
-      const refreshTokenHash = crypto.hashToken(refreshToken);
-      
       const query = `
-        SELECT s.*, u.email, u.email_verified, c.id as client_id
-        FROM sessions s
-        JOIN users u ON s.user_id = u.id
-        JOIN clients c ON s.client_id = c.id
-        WHERE s.refresh_token_hash = $1 AND s.expires_at > NOW() AND s.revoked = false
+        SELECT *
+        FROM sessions
+        WHERE refresh_token = $1 AND expires_at > NOW() AND revoked = false
       `;
-      
-      const result = await database.query(query, [refreshTokenHash]);
+
+      const result = await database.query(query, [refreshToken]);
       return result.rows[0] || null;
     } catch (error) {
       logger.error('Find session by refresh token error:', error);
@@ -54,33 +65,42 @@ class Session {
     }
   }
 
-  static async findByUserId(userId, clientId) {
+  /**
+   * Find sessions for a specific entity
+   * @param {string} type - 'admin', 'client', or 'user'
+   * @param {number} entityId 
+   */
+  static async findByEntity(type, entityId) {
     try {
       const query = `
-        SELECT id, device_info, ip_address, created_at, last_used_at, expires_at
+        SELECT id, ip_address, user_agent, created_at, expires_at
         FROM sessions 
-        WHERE user_id = $1 AND client_id = $2 AND revoked = false AND expires_at > NOW()
-        ORDER BY last_used_at DESC
+        WHERE session_type = $1 AND entity_id = $2 AND revoked = false AND expires_at > NOW()
+        ORDER BY created_at DESC
       `;
-      
-      const result = await database.query(query, [userId, clientId]);
+
+      const result = await database.query(query, [type, entityId]);
       return result.rows;
     } catch (error) {
-      logger.error('Find sessions by user ID error:', error);
+      logger.error('Find sessions by entity error:', error);
       throw error;
     }
   }
 
-  static async revoke(refreshTokenHash) {
+  /**
+   * Revoke a session by refresh token
+   * @param {string} refreshToken 
+   */
+  static async revoke(refreshToken) {
     try {
       const query = `
         UPDATE sessions 
         SET revoked = true, revoked_at = NOW() 
-        WHERE refresh_token_hash = $1
+        WHERE refresh_token = $1
         RETURNING id
       `;
-      
-      const result = await database.query(query, [refreshTokenHash]);
+
+      const result = await database.query(query, [refreshToken]);
       return result.rows[0] || null;
     } catch (error) {
       logger.error('Revoke session error:', error);
@@ -88,16 +108,22 @@ class Session {
     }
   }
 
-  static async revokeById(sessionId, userId, clientId) {
+  /**
+   * Revoke a specific session by ID
+   * @param {number} sessionId 
+   * @param {string} type 
+   * @param {number} entityId 
+   */
+  static async revokeById(sessionId, type, entityId) {
     try {
       const query = `
         UPDATE sessions 
         SET revoked = true, revoked_at = NOW() 
-        WHERE id = $1 AND user_id = $2 AND client_id = $3
+        WHERE id = $1 AND session_type = $2 AND entity_id = $3
         RETURNING id
       `;
-      
-      const result = await database.query(query, [sessionId, userId, clientId]);
+
+      const result = await database.query(query, [sessionId, type, entityId]);
       return result.rows[0] || null;
     } catch (error) {
       logger.error('Revoke session by ID error:', error);
@@ -105,36 +131,24 @@ class Session {
     }
   }
 
-  static async revokeAllUserSessions(userId, clientId) {
+  /**
+   * Revoke all sessions for an entity
+   * @param {string} type 
+   * @param {number} entityId 
+   */
+  static async revokeAllForEntity(type, entityId) {
     try {
       const query = `
         UPDATE sessions 
         SET revoked = true, revoked_at = NOW() 
-        WHERE user_id = $1 AND client_id = $2 AND revoked = false
+        WHERE session_type = $1 AND entity_id = $2 AND revoked = false
         RETURNING COUNT(*) as revoked_count
       `;
-      
-      const result = await database.query(query, [userId, clientId]);
+
+      const result = await database.query(query, [type, entityId]);
       return parseInt(result.rows[0].revoked_count) || 0;
     } catch (error) {
-      logger.error('Revoke all user sessions error:', error);
-      throw error;
-    }
-  }
-
-  static async updateLastUsed(sessionId) {
-    try {
-      const query = `
-        UPDATE sessions 
-        SET last_used_at = NOW() 
-        WHERE id = $1
-        RETURNING id
-      `;
-      
-      const result = await database.query(query, [sessionId]);
-      return result.rows[0] || null;
-    } catch (error) {
-      logger.error('Update session last used error:', error);
+      logger.error('Revoke all sessions for entity error:', error);
       throw error;
     }
   }
@@ -146,7 +160,7 @@ class Session {
         WHERE expires_at < NOW() OR revoked = true
         RETURNING COUNT(*) as deleted_count
       `;
-      
+
       const result = await database.query(query);
       return parseInt(result.rows[0].deleted_count) || 0;
     } catch (error) {
@@ -155,15 +169,15 @@ class Session {
     }
   }
 
-  static async getActiveSessionsCount(clientId) {
+  static async getActiveSessionsCount(type, entityId) {
     try {
       const query = `
         SELECT COUNT(*) as count
         FROM sessions 
-        WHERE client_id = $1 AND revoked = false AND expires_at > NOW()
+        WHERE session_type = $1 AND entity_id = $2 AND revoked = false AND expires_at > NOW()
       `;
-      
-      const result = await database.query(query, [clientId]);
+
+      const result = await database.query(query, [type, entityId]);
       return parseInt(result.rows[0].count) || 0;
     } catch (error) {
       logger.error('Get active sessions count error:', error);
@@ -171,7 +185,7 @@ class Session {
     }
   }
 
-  static async getSessionStats(clientId, period = '30d') {
+  static async getSessionStats(type, entityId, period = '30d') {
     try {
       let interval;
       switch (period) {
@@ -185,37 +199,31 @@ class Session {
         totalSessions: `
           SELECT COUNT(*) as count
           FROM sessions 
-          WHERE client_id = $1 AND created_at > NOW() - INTERVAL '${interval}'
+          WHERE session_type = $1 AND entity_id = $2 AND created_at > NOW() - INTERVAL '${interval}'
         `,
         activeSessions: `
           SELECT COUNT(*) as count
           FROM sessions 
-          WHERE client_id = $1 AND revoked = false AND expires_at > NOW()
+          WHERE session_type = $1 AND entity_id = $2 AND revoked = false AND expires_at > NOW()
         `,
         revokedSessions: `
           SELECT COUNT(*) as count
           FROM sessions 
-          WHERE client_id = $1 AND revoked = true AND created_at > NOW() - INTERVAL '${interval}'
-        `,
-        avgSessionDuration: `
-          SELECT AVG(EXTRACT(EPOCH FROM (last_used_at - created_at))) as avg_duration
-          FROM sessions 
-          WHERE client_id = $1 AND last_used_at IS NOT NULL AND created_at > NOW() - INTERVAL '${interval}'
-        `,
+          WHERE session_type = $1 AND entity_id = $2 AND revoked = true AND created_at > NOW() - INTERVAL '${interval}'
+        `
       };
 
       const stats = {};
-      
+
       for (const [key, query] of Object.entries(queries)) {
-        const result = await database.query(query, [clientId]);
+        const result = await database.query(query, [type, entityId]);
         stats[key] = result.rows[0];
       }
 
       return {
         total_sessions: parseInt(stats.totalSessions.count) || 0,
         active_sessions: parseInt(stats.activeSessions.count) || 0,
-        revoked_sessions: parseInt(stats.revokedSessions.count) || 0,
-        avg_session_duration: parseFloat(stats.avgSessionDuration.avg_duration) || 0,
+        revoked_sessions: parseInt(stats.revokedSessions.count) || 0
       };
     } catch (error) {
       logger.error('Get session stats error:', error);

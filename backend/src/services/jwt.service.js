@@ -23,13 +23,13 @@ class JWTService {
 
       // Use client's specific key for signing
       const token = await ClientKeyService.signJwt(clientId, payload);
-      
-      logger.auth('Access token generated with client key', { 
-        userId, 
-        userType, 
+
+      logger.auth('Access token generated with client key', {
+        userId,
+        userType,
         clientId
       });
-      
+
       return token;
     } catch (error) {
       logger.error('Failed to generate access token:', error);
@@ -44,25 +44,24 @@ class JWTService {
     try {
       const refreshToken = require('crypto').randomBytes(40).toString('hex');
       const hashedToken = require('crypto').createHash('sha256').update(refreshToken).digest('hex');
-      
+
       const expiresAt = new Date(Date.now() + this.refreshTokenExpiry * 1000);
 
-      // PERFECT MATCH: Uses only columns that exist in your schema
+      // FIXED: Uses entity_id and session_type consistently with your schema
       const query = `
         INSERT INTO sessions (
-          user_id, client_id, session_type, refresh_token, expires_at, ip_address
+          entity_id, session_type, refresh_token, expires_at, ip_address, user_agent
         ) VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING id
       `;
-      
+
       const result = await database.query(query, [
-        userId, 
-        clientId, 
+        userId,
         'user', // session_type
-        hashedToken, 
+        hashedToken,
         expiresAt,
-        deviceInfo.ip_address || '127.0.0.1'
-        // Note: No user_agent column in your schema
+        deviceInfo.ip_address || '127.0.0.1',
+        deviceInfo.user_agent || 'unknown'
       ]);
 
       logger.auth('Refresh token generated', { userId, clientId });
@@ -78,31 +77,53 @@ class JWTService {
    */
   async verifyToken(token, clientId = null) {
     try {
-      // If clientId not provided, extract from token
+      const jwt = require('jsonwebtoken');
+      const decoded = jwt.decode(token);
+
+      if (!decoded) {
+        throw new Error('Invalid token structure');
+      }
+
+      // If clientId not provided, try to extract from token
       if (!clientId) {
-        const decoded = require('jsonwebtoken').decode(token);
         clientId = decoded.client_id;
-        
+
         if (!clientId && decoded.iss) {
-          // Extract from issuer: "client-{id}"
-          const match = decoded.iss.match(/client-(\d+)/);
+          // Extract from issuer: "authjet-client-{id}"
+          const match = decoded.iss.match(/authjet-client-(\d+)/);
           clientId = match ? match[1] : null;
         }
       }
 
-      if (!clientId) {
-        throw new Error('Client ID required for token verification');
+      // FALLBACK: If still no clientId, or if it's an admin/platform token, verify with platform secret
+      if (!clientId || decoded.user_type === 'admin') {
+        const platformSecret = process.env.JWT_SECRET || 'default-jwt-secret-change-in-production';
+        try {
+          const verified = jwt.verify(token, platformSecret);
+          logger.auth('Token verified with platform secret', {
+            userId: verified.sub,
+            userType: verified.user_type || 'unknown'
+          });
+          return verified;
+        } catch (hmacError) {
+          if (!clientId) throw hmacError;
+          // If it has a clientId, we continue to RSA verification
+        }
       }
 
-      // Use client's specific key for verification
-      const decoded = await ClientKeyService.verifyJwt(clientId, token);
-      
-      logger.auth('Token verified with client key', { 
-        userId: decoded.sub, 
-        clientId: decoded.client_id 
-      });
-      
-      return decoded;
+      // RSA verification (client-specific)
+      if (clientId) {
+        const verified = await ClientKeyService.verifyJwt(clientId, token);
+
+        logger.auth('Token verified with client key', {
+          userId: verified.sub,
+          clientId: verified.client_id
+        });
+
+        return verified;
+      }
+
+      throw new Error('Client ID required for token verification');
     } catch (error) {
       logger.warn('Token verification failed:', error.message);
       throw error;
@@ -115,24 +136,24 @@ class JWTService {
   async refreshTokens(refreshToken) {
     try {
       const hashedToken = require('crypto').createHash('sha256').update(refreshToken).digest('hex');
-      
+
       // Updated query for your exact sessions schema
       const query = `
         SELECT s.*, u.email, u.email_verified, c.id as client_id
         FROM sessions s
-        JOIN users u ON s.user_id = u.id
-        JOIN clients c ON s.client_id = c.id
-        WHERE s.refresh_token = $1 AND s.expires_at > NOW() AND (s.revoked = false OR s.revoked IS NULL)
+        JOIN users u ON s.entity_id = u.id
+        JOIN clients c ON u.client_id = c.id
+        WHERE s.refresh_token = $1 AND s.session_type = 'user' AND s.expires_at > NOW() AND (s.revoked = false OR s.revoked IS NULL)
       `;
 
       const result = await database.query(query, [hashedToken]);
-      
+
       if (result.rows.length === 0) {
         throw new Error('Invalid or expired refresh token');
       }
 
       const session = result.rows[0];
-      
+
       // Generate new access token with client's key
       const newAccessToken = await this.generateAccessToken(
         session.user_id,
@@ -149,7 +170,7 @@ class JWTService {
         ip_address: session.ip_address
         // No user_agent in your schema
       };
-      
+
       const newRefreshToken = await this.generateRefreshToken(
         session.user_id,
         session.client_id,
@@ -159,9 +180,9 @@ class JWTService {
       // Revoke old refresh token
       await this.revokeRefreshToken(hashedToken);
 
-      logger.auth('Tokens refreshed with client key', { 
-        userId: session.user_id, 
-        clientId: session.client_id 
+      logger.auth('Tokens refreshed with client key', {
+        userId: session.user_id,
+        clientId: session.client_id
       });
 
       return {
@@ -186,7 +207,7 @@ class JWTService {
         SET revoked = true, revoked_at = NOW() 
         WHERE refresh_token = $1
       `;
-      
+
       await database.query(query, [tokenHash]);
       logger.auth('Refresh token revoked', { tokenHash: tokenHash.substring(0, 16) + '...' });
     } catch (error) {
@@ -223,7 +244,7 @@ class JWTService {
       const crypto = require('crypto');
       const keyObject = crypto.createPublicKey(publicKey);
       const jwk = keyObject.export({ format: 'jwk' });
-      
+
       return {
         ...jwk,
         use: 'sig',
@@ -244,7 +265,7 @@ class JWTService {
         SET revoked = true, revoked_at = NOW() 
         WHERE user_id = $1 AND client_id = $2 AND (revoked = false OR revoked IS NULL)
       `;
-      
+
       await database.query(query, [userId, clientId]);
       logger.auth('All user sessions revoked', { userId, clientId });
     } catch (error) {
@@ -261,7 +282,7 @@ class JWTService {
         WHERE user_id = $1 AND client_id = $2 AND (revoked = false OR revoked IS NULL) AND expires_at > NOW()
         ORDER BY created_at DESC
       `;
-      
+
       const result = await database.query(query, [userId, clientId]);
       return result.rows;
     } catch (error) {

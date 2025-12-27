@@ -11,6 +11,7 @@ const router = express.Router();
 // Client authentication routes (no auth required)
 router.post('/register', clientAuthController.register);
 router.post('/login', clientAuthController.login);
+router.post('/refresh-token', clientAuthController.refreshToken);
 router.post('/forgot-password', clientAuthController.forgotPassword);
 router.post('/reset-password', clientAuthController.resetPassword);
 router.post('/verify-email', clientAuthController.verifyEmail);

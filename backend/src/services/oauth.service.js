@@ -3,7 +3,7 @@ const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const GitHubStrategy = require('passport-github2').Strategy;
 const database = require('../utils/database');
 const logger = require('../utils/logger');
-const bcrypt = require('bcryptjs');
+const crypto = require('../utils/crypto');
 const ClientKeyService = require('./clientKey.service');
 
 class OAuthService {
@@ -17,64 +17,72 @@ class OAuthService {
     }
 
     // Google OAuth Strategy
-    passport.use('google-client', new GoogleStrategy({
-      clientID: process.env.GOOGLE_CLIENT_ID,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-      callbackURL: `${process.env.BACKEND_URL || 'http://localhost:8000'}/api/auth/google/callback`,
-      scope: ['profile', 'email']
-    }, async (accessToken, refreshToken, profile, done) => {
-      try {
-        const result = await this.handleGoogleAuth(profile, 'client');
-        return done(null, result);
-      } catch (error) {
-        return done(error, null);
-      }
-    }));
+    if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+      passport.use('google-client', new GoogleStrategy({
+        clientID: process.env.GOOGLE_CLIENT_ID,
+        clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+        callbackURL: `${process.env.BACKEND_URL || 'http://localhost:8000'}/api/auth/google/callback`,
+        scope: ['profile', 'email']
+      }, async (accessToken, refreshToken, profile, done) => {
+        try {
+          const result = await this.handleGoogleAuth(profile, 'client');
+          return done(null, result);
+        } catch (error) {
+          return done(error, null);
+        }
+      }));
 
-    // Google OAuth Strategy for Admin
-    passport.use('google-admin', new GoogleStrategy({
-      clientID: process.env.GOOGLE_CLIENT_ID,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-      callbackURL: `${process.env.BACKEND_URL || 'http://localhost:8000'}/api/auth/google/admin/callback`,
-      scope: ['profile', 'email']
-    }, async (accessToken, refreshToken, profile, done) => {
-      try {
-        const result = await this.handleGoogleAuth(profile, 'admin');
-        return done(null, result);
-      } catch (error) {
-        return done(error, null);
-      }
-    }));
+      // Google OAuth Strategy for Admin
+      passport.use('google-admin', new GoogleStrategy({
+        clientID: process.env.GOOGLE_CLIENT_ID,
+        clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+        callbackURL: `${process.env.BACKEND_URL || 'http://localhost:8000'}/api/auth/google/admin/callback`,
+        scope: ['profile', 'email']
+      }, async (accessToken, refreshToken, profile, done) => {
+        try {
+          const result = await this.handleGoogleAuth(profile, 'admin');
+          return done(null, result);
+        } catch (error) {
+          return done(error, null);
+        }
+      }));
+    } else {
+      logger.info('Google OAuth credentials missing, skipping strategy initialization');
+    }
 
     // GitHub OAuth Strategy
-    passport.use('github-client', new GitHubStrategy({
-      clientID: process.env.GITHUB_CLIENT_ID,
-      clientSecret: process.env.GITHUB_CLIENT_SECRET,
-      callbackURL: `${process.env.BACKEND_URL || 'http://localhost:8000'}/api/auth/github/callback`,
-      scope: ['user:email']
-    }, async (accessToken, refreshToken, profile, done) => {
-      try {
-        const result = await this.handleGitHubAuth(profile, 'client');
-        return done(null, result);
-      } catch (error) {
-        return done(error, null);
-      }
-    }));
+    if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
+      passport.use('github-client', new GitHubStrategy({
+        clientID: process.env.GITHUB_CLIENT_ID,
+        clientSecret: process.env.GITHUB_CLIENT_SECRET,
+        callbackURL: `${process.env.BACKEND_URL || 'http://localhost:8000'}/api/auth/github/callback`,
+        scope: ['user:email']
+      }, async (accessToken, refreshToken, profile, done) => {
+        try {
+          const result = await this.handleGitHubAuth(profile, 'client');
+          return done(null, result);
+        } catch (error) {
+          return done(error, null);
+        }
+      }));
 
-    // GitHub OAuth Strategy for Admin
-    passport.use('github-admin', new GitHubStrategy({
-      clientID: process.env.GITHUB_CLIENT_ID,
-      clientSecret: process.env.GITHUB_CLIENT_SECRET,
-      callbackURL: `${process.env.BACKEND_URL || 'http://localhost:8000'}/api/auth/github/admin/callback`,
-      scope: ['user:email']
-    }, async (accessToken, refreshToken, profile, done) => {
-      try {
-        const result = await this.handleGitHubAuth(profile, 'admin');
-        return done(null, result);
-      } catch (error) {
-        return done(error, null);
-      }
-    }));
+      // GitHub OAuth Strategy for Admin
+      passport.use('github-admin', new GitHubStrategy({
+        clientID: process.env.GITHUB_CLIENT_ID,
+        clientSecret: process.env.GITHUB_CLIENT_SECRET,
+        callbackURL: `${process.env.BACKEND_URL || 'http://localhost:8000'}/api/auth/github/admin/callback`,
+        scope: ['user:email']
+      }, async (accessToken, refreshToken, profile, done) => {
+        try {
+          const result = await this.handleGitHubAuth(profile, 'admin');
+          return done(null, result);
+        } catch (error) {
+          return done(error, null);
+        }
+      }));
+    } else {
+      logger.info('GitHub OAuth credentials missing, skipping strategy initialization');
+    }
 
     // Passport serialization
     passport.serializeUser((user, done) => {
@@ -101,27 +109,27 @@ class OAuthService {
   async handleGitHubAuth(profile, userType) {
     // Try multiple sources for email
     let email = null;
-    
+
     // Check profile.emails array
     if (profile.emails && profile.emails.length > 0) {
       email = profile.emails[0].value;
     }
-    
+
     // Check profile._json for email
     if (!email && profile._json && profile._json.email) {
       email = profile._json.email;
     }
-    
+
     // Use username@users.noreply.github.com as fallback
     if (!email && profile.username) {
       email = `${profile.username}@users.noreply.github.com`;
       logger.warn('GitHub email not available, using fallback email', { username: profile.username, fallbackEmail: email });
     }
-    
+
     if (!email) {
       throw new Error('Unable to obtain email from GitHub profile. Please ensure your GitHub email is public or contact support.');
     }
-    
+
     const name = profile.displayName || profile.username;
     const githubId = profile.id;
 
@@ -165,8 +173,8 @@ class OAuthService {
           throw new Error(`Unsupported OAuth provider: ${provider}`);
       }
 
-      logger.info('OAuth user profile received', { 
-        email: userProfile.email, 
+      logger.info('OAuth user profile received', {
+        email: userProfile.email,
         provider: provider,
         userType: userType
       });
@@ -177,7 +185,7 @@ class OAuthService {
       } else {
         return await this.handleClientOAuth(userProfile.email, userProfile.name, userProfile.id, provider);
       }
-      
+
     } catch (error) {
       logger.error('OAuth code exchange failed', { error: error.message, provider, userType });
       throw new Error(`OAuth authentication failed: ${error.message}`);
@@ -196,7 +204,7 @@ class OAuthService {
         logger.error('Google auth library not found. Please run: npm install google-auth-library');
         throw new Error('OAuth provider not configured properly');
       }
-      
+
       if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
         throw new Error('Google OAuth not configured');
       }
@@ -209,7 +217,7 @@ class OAuthService {
 
       logger.info('Exchanging Google code for tokens');
       const { tokens } = await client.getToken(code);
-      
+
       if (!tokens.id_token) {
         throw new Error('No ID token received from Google');
       }
@@ -221,7 +229,7 @@ class OAuthService {
       });
 
       const payload = ticket.getPayload();
-      
+
       if (!payload.email) {
         throw new Error('No email in Google OAuth response');
       }
@@ -238,11 +246,11 @@ class OAuthService {
       throw new Error(`Google OAuth failed: ${error.message}`);
     }
   }
-  
+
   // GitHub OAuth exchange
   async exchangeGitHubCode(code, redirectUri) {
     const axios = require('axios');
-    
+
     try {
       if (!process.env.GITHUB_CLIENT_ID || !process.env.GITHUB_CLIENT_SECRET) {
         throw new Error('GitHub OAuth not configured');
@@ -317,7 +325,7 @@ class OAuthService {
     try {
       // Check if admin exists in admin table by email OR by provider ID
       let adminResult;
-      
+
       if (provider === 'google') {
         adminResult = await database.query(
           'SELECT id, email, name, is_active, google_id FROM admins WHERE email = $1 OR google_id = $2',
@@ -380,9 +388,9 @@ class OAuthService {
         { expiresIn: '24h' }
       );
 
-      logger.info('Admin OAuth login successful', { 
-        adminId: admin.id, 
-        email: email.toLowerCase(), 
+      logger.info('Admin OAuth login successful', {
+        adminId: admin.id,
+        email: email.toLowerCase(),
         provider: provider,
         providerId: providerId
       });
@@ -408,7 +416,7 @@ class OAuthService {
     try {
       // Check if client exists by email OR by provider ID
       let clientResult;
-      
+
       if (provider === 'google') {
         clientResult = await database.query(
           'SELECT id, email, name, is_active, google_id FROM clients WHERE email = $1 OR google_id = $2',
@@ -431,23 +439,23 @@ class OAuthService {
            RETURNING id, email, name, is_active`,
           [email.toLowerCase(), name, providerId]
         );
-        
+
         client = insertResult.rows[0];
-        
+
         // Generate RSA key pair for new OAuth client
         try {
           const keyPair = await ClientKeyService.generateKeyPair(client.id);
-          logger.info('OAuth client RSA key pair generated', { 
-            clientId: client.id, 
-            keyId: keyPair.keyId 
+          logger.info('OAuth client RSA key pair generated', {
+            clientId: client.id,
+            keyId: keyPair.keyId
           });
         } catch (keyError) {
           logger.error('Failed to generate RSA key pair for OAuth client:', keyError);
         }
-        
-        logger.info('New client created via OAuth', { 
-          clientId: client.id, 
-          email: client.email, 
+
+        logger.info('New client created via OAuth', {
+          clientId: client.id,
+          email: client.email,
           provider: provider,
           providerId: providerId
         });
@@ -483,9 +491,9 @@ class OAuthService {
           );
         }
 
-        logger.info('Existing client OAuth login', { 
-          clientId: client.id, 
-          email: email.toLowerCase(), 
+        logger.info('Existing client OAuth login', {
+          clientId: client.id,
+          email: email.toLowerCase(),
           provider: provider,
           providerId: providerId
         });
