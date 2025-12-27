@@ -52,14 +52,8 @@ router.get('/.well-known/jwks/:application_id.json', async (req, res) => {
     // Get public JWKs for application
     const keys = await ApplicationKeyService.getPublicJwk(application_id);
 
-    if (keys.length === 0) {
-      logger.warn('No active keys found for application', { application_id });
-      return res.status(404).json({
-        error: 'No active keys found for this application',
-        code: 'NO_KEYS_FOUND',
-        message: 'Application must generate keys first'
-      });
-    }
+    // Return JWKS with proper caching headers
+    // NOTE: Always return 200 even if empty to follow OIDC standards
 
     // Return JWKS with proper caching headers
     res.set({

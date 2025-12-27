@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 const logger = require('./logger');
 
 class CryptoUtils {
@@ -17,16 +17,16 @@ class CryptoUtils {
 
   getEncryptionKey() {
     let key = process.env.KEY_ENCRYPTION_KEY;
-    
+
     if (!key) {
       logger.warn('KEY_ENCRYPTION_KEY not found, using JWT secret as fallback');
       key = process.env.JWT_SECRET;
     }
-    
+
     if (!key) {
       throw new Error('No encryption key available. Set KEY_ENCRYPTION_KEY environment variable.');
     }
-    
+
     return crypto.createHash('sha256').update(key).digest();
   }
 
@@ -34,21 +34,21 @@ class CryptoUtils {
     try {
       const key = password ? crypto.createHash('sha256').update(password).digest() : this.getEncryptionKey();
       const iv = crypto.randomBytes(this.ivLength);
-      
+
       const cipher = crypto.createCipher(this.algorithm, key);
       cipher.setAAD(Buffer.from('authjet-saas'));
-      
+
       let encrypted = cipher.update(plaintext, 'utf8', 'hex');
       encrypted += cipher.final('hex');
-      
+
       const authTag = cipher.getAuthTag();
-      
+
       const result = Buffer.concat([
         iv,
         authTag,
         Buffer.from(encrypted, 'hex')
       ]).toString('base64');
-      
+
       return result;
     } catch (error) {
       logger.error('Encryption error:', error);
@@ -60,18 +60,18 @@ class CryptoUtils {
     try {
       const key = password ? crypto.createHash('sha256').update(password).digest() : this.getEncryptionKey();
       const buffer = Buffer.from(encryptedData, 'base64');
-      
+
       const iv = buffer.slice(0, this.ivLength);
       const authTag = buffer.slice(this.ivLength, this.ivLength + this.authTagLength);
       const encrypted = buffer.slice(this.ivLength + this.authTagLength);
-      
+
       const decipher = crypto.createDecipher(this.algorithm, key);
       decipher.setAAD(Buffer.from('authjet-saas'));
       decipher.setAuthTag(authTag);
-      
+
       let decrypted = decipher.update(encrypted, 'hex', 'utf8');
       decrypted += decipher.final('utf8');
-      
+
       return decrypted;
     } catch (error) {
       logger.error('Decryption error:', error);
@@ -107,6 +107,10 @@ class CryptoUtils {
     }
   }
 
+  async comparePassword(password, hash) {
+    return this.verifyPassword(password, hash);
+  }
+
   validatePasswordStrength(password) {
     const requirements = {
       minLength: 8,
@@ -116,7 +120,7 @@ class CryptoUtils {
       hasSpecialChar: /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)
     };
 
-    const isStrong = 
+    const isStrong =
       password.length >= requirements.minLength &&
       requirements.hasUpperCase &&
       requirements.hasLowerCase &&
@@ -189,8 +193,8 @@ class CryptoUtils {
         if (err) {
           reject(err);
         } else {
-          resolve({ 
-            publicKey, 
+          resolve({
+            publicKey,
             privateKey,
             keyId: this.generateKeyId()
           });
@@ -215,8 +219,8 @@ class CryptoUtils {
         if (err) {
           reject(err);
         } else {
-          resolve({ 
-            publicKey, 
+          resolve({
+            publicKey,
             privateKey,
             keyId: this.generateKeyId()
           });
@@ -341,12 +345,12 @@ class CryptoUtils {
     let base64 = encodedData
       .replace(/-/g, '+')
       .replace(/_/g, '/');
-    
+
     // Add padding if necessary
     while (base64.length % 4) {
       base64 += '=';
     }
-    
+
     return this.base64Decode(base64, parseJson);
   }
 
@@ -355,24 +359,24 @@ class CryptoUtils {
   // ============================================
 
   isValidHash(hash) {
-    return typeof hash === 'string' && 
-           hash.length === 64 && 
-           /^[a-f0-9]+$/.test(hash);
+    return typeof hash === 'string' &&
+      hash.length === 64 &&
+      /^[a-f0-9]+$/.test(hash);
   }
 
   isValidToken(token, minLength = 16) {
-    return typeof token === 'string' && 
-           token.length >= minLength;
+    return typeof token === 'string' &&
+      token.length >= minLength;
   }
 
   isValidKeyFormat(key) {
     if (typeof key !== 'string') return false;
-    
+
     // Check for PEM format
     if (key.includes('-----BEGIN') && key.includes('-----END')) {
       return true;
     }
-    
+
     // Check for base64 format
     try {
       Buffer.from(key, 'base64');

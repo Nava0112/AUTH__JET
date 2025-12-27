@@ -3,9 +3,8 @@ const crypto = require('crypto');
 const database = require('../utils/database');
 const logger = require('../utils/logger');
 const ApplicationKeyService = require('./applicationKey.service');
-const database = require('../utils/database');
-const logger = require('../utils/logger');
-const crypto = require('crypto');
+const Session = require('../models/Session');
+const User = require('../models/User');
 
 /**
  * User JWT Service
@@ -89,41 +88,28 @@ class UserJwtService {
    * @param {string} ipAddress - User's IP address
    * @returns {string} Refresh token
    */
-  async generateRefreshToken(userId, applicationId, ipAddress) {
+  async generateRefreshToken(userId, applicationId, ipAddress, userAgent) {
     try {
-      // Generate random refresh token
       const refreshToken = crypto.randomBytes(40).toString('hex');
       const hashedToken = crypto
         .createHash('sha256')
         .update(refreshToken)
         .digest('hex');
 
-      const expiresAt = new Date(Date.now() + this.refreshTokenExpiry * 1000);
-
-      // Store in polymorphic sessions table
-      const query = `
-        INSERT INTO sessions (
-          session_type, entity_id, refresh_token, expires_at, ip_address
-        ) VALUES ($1, $2, $3, $4, $5)
-        RETURNING id
-      `;
-
-      await database.query(query, [
-        'user',           // session_type
-        userId,           // entity_id
-        hashedToken,      // hashed refresh token
-        expiresAt,
-        ipAddress
-      ]);
+      await Session.create({
+        session_type: 'user',
+        entity_id: userId,
+        refresh_token: hashedToken,
+        ip_address: ipAddress,
+        user_agent: userAgent
+      });
 
       logger.debug('User refresh token generated', {
         userId,
-        applicationId,
-        expiresAt
+        applicationId
       });
 
-      return refreshToken; // Return unhashed token to client
-
+      return refreshToken;
     } catch (error) {
       logger.error('Refresh token generation error:', error);
       throw error;
@@ -145,35 +131,20 @@ class UserJwtService {
         .update(refreshToken)
         .digest('hex');
 
-      // Look up session in polymorphic table
-      const query = `
-        SELECT 
-          s.*,
-          u.email,
-          u.role,
-          u.email_verified,
-          u.is_active,
-          u.application_id
-        FROM sessions s
-        JOIN users u ON s.entity_id = u.id
-        WHERE s.refresh_token = $1 
-          AND s.session_type = 'user'
-          AND s.expires_at > NOW() 
-          AND (s.revoked = false OR s.revoked IS NULL)
-          AND u.application_id = $2
-      `;
+      const session = await Session.findByRefreshToken(hashedToken);
 
-      const result = await database.query(query, [hashedToken, applicationId]);
-
-      if (result.rows.length === 0) {
+      if (!session || session.session_type !== 'user') {
         throw new Error('Invalid or expired refresh token');
       }
 
-      const session = result.rows[0];
       const userId = session.entity_id;
 
-      // Verify user is still active
-      if (!session.is_active) {
+      const user = await User.findById(userId);
+      if (!user || user.application_id !== parseInt(applicationId)) {
+        throw new Error('User does not belong to this application');
+      }
+
+      if (!user.is_active) {
         throw new Error('User account is inactive');
       }
 
@@ -182,9 +153,9 @@ class UserJwtService {
         userId,
         applicationId,
         {
-          email: session.email,
-          role: session.role,
-          email_verified: session.email_verified
+          email: user.email,
+          role: user.role,
+          email_verified: user.email_verified
         }
       );
 
@@ -192,16 +163,14 @@ class UserJwtService {
       const newRefreshToken = await this.generateRefreshToken(
         userId,
         applicationId,
-        session.ip_address
+        session.ip_address,
+        session.user_agent
       );
 
       // Revoke old refresh token
-      await this.revokeRefreshToken(hashedToken);
+      await Session.revoke(hashedToken);
 
-      logger.info('Tokens refreshed', {
-        userId,
-        applicationId
-      });
+      logger.info('Tokens refreshed', { userId, applicationId });
 
       return {
         access_token: newAccessToken,
@@ -209,32 +178,18 @@ class UserJwtService {
         token_type: 'Bearer',
         expires_in: this.accessTokenExpiry
       };
-
     } catch (error) {
       logger.error('Token refresh error:', error);
       throw error;
     }
   }
 
-  /**
-   * Revoke a refresh token
-   * 
-   * @param {string} tokenHash - Hashed refresh token
-   */
   async revokeRefreshToken(tokenHash) {
     try {
-      const query = `
-        UPDATE sessions 
-        SET revoked = true, revoked_at = NOW() 
-        WHERE refresh_token = $1 AND session_type = 'user'
-      `;
-
-      await database.query(query, [tokenHash]);
-
+      await Session.revoke(tokenHash);
       logger.debug('Refresh token revoked', {
         tokenHash: tokenHash.substring(0, 16) + '...'
       });
-
     } catch (error) {
       logger.error('Revoke refresh token error:', error);
       throw error;
@@ -248,23 +203,9 @@ class UserJwtService {
    */
   async revokeAllUserSessions(userId) {
     try {
-      const query = `
-        UPDATE sessions 
-        SET revoked = true, revoked_at = NOW() 
-        WHERE entity_id = $1 
-          AND session_type = 'user'
-          AND (revoked = false OR revoked IS NULL)
-      `;
-
-      const result = await database.query(query, [userId]);
-
-      logger.info('All user sessions revoked', {
-        userId,
-        count: result.rowCount
-      });
-
-      return { revoked: result.rowCount };
-
+      const revokedCount = await Session.revokeAllForEntity('user', userId);
+      logger.info('All user sessions revoked', { userId, count: revokedCount });
+      return { revoked: revokedCount };
     } catch (error) {
       logger.error('Revoke all user sessions error:', error);
       throw error;
@@ -312,30 +253,13 @@ class UserJwtService {
    */
   async revokeSession(sessionId, userId) {
     try {
-      const query = `
-        UPDATE sessions 
-        SET revoked = true, revoked_at = NOW() 
-        WHERE id = $1 
-          AND entity_id = $2 
-          AND session_type = 'user'
-      `;
-
-      const result = await database.query(query, [sessionId, userId]);
-
-      if (result.rowCount === 0) {
-        throw new Error('Session not found or already revoked');
-      }
-
+      await Session.revokeById(sessionId, 'user', userId);
       logger.info('Session revoked', { sessionId, userId });
-
     } catch (error) {
       logger.error('Revoke session error:', error);
       throw error;
     }
   }
 }
-
-module.exports = new UserJwtService();
-
 
 module.exports = new UserJwtService();

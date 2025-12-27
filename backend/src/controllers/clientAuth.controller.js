@@ -5,48 +5,36 @@ const jwtService = require('../services/jwt.service');
 const emailService = require('../services/email.service');
 const ClientKeyService = require('../services/clientKey.service');
 const ApplicationKeyService = require('../services/applicationKey.service');
+const Client = require('../models/Client');
+const Session = require('../models/Session');
+const User = require('../models/User');
 
 class ClientAuthController {
   async register(req, res, next) {
     const {
       name, email, password, company_name, website, phone,
-      plan_type = 'free'
+      plan_type = 'basic'
     } = req.body;
 
     try {
-      // Check if client already exists
-      const existingQuery = 'SELECT id FROM clients WHERE email = $1';
-      const existing = await database.query(existingQuery, [email]);
+      const existing = await Client.findByEmail(email);
 
-      if (existing.rows.length > 0) {
+      if (existing) {
         return res.status(409).json({
           error: 'Client with this email already exists',
           code: 'CLIENT_EXISTS',
         });
       }
 
-      // Generate API credentials
-      const apiKey = 'cli_' + crypto.randomString(16);
-      const secretKey = crypto.randomString(32);
-      const secretKeyHash = await crypto.hashPassword(secretKey);
-      const passwordHash = await crypto.hashPassword(password);
-
-      // Create client
-      const insertQuery = `
-        INSERT INTO clients (
-          name, email, password_hash, company_name, website, phone,
-          plan_type, api_key, secret_key_hash, is_active, email_verified
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-        RETURNING id, name, email, company_name, plan_type, created_at
-      `;
-
-      const result = await database.query(insertQuery, [
-        name, email, passwordHash, company_name, website, phone,
-        plan_type, apiKey, secretKeyHash, true, false
-      ]);
-
-      const client = result.rows[0];
+      const client = await Client.create({
+        name,
+        email,
+        password,
+        organization_name: company_name,
+        website,
+        phone,
+        plan_type
+      });
 
       // Send welcome email with verification
       try {
@@ -55,7 +43,7 @@ class ClientAuthController {
         logger.error('Failed to send welcome email:', emailError);
       }
 
-      // Auto-generate RSA key pair for this client (new requirement)
+      // Auto-generate RSA key pair for this client
       let keyPair = null;
       try {
         keyPair = await ClientKeyService.generateKeyPair(client.id);
@@ -74,13 +62,13 @@ class ClientAuthController {
           id: client.id,
           name: client.name,
           email: client.email,
-          company_name: client.company_name,
+          organization_name: client.organization_name,
           plan_type: client.plan_type,
           created_at: client.created_at,
         },
         api_credentials: {
-          api_key: apiKey,
-          secret_key: secretKey, // Only shown once
+          client_id: client.client_id,
+          client_secret: client.client_secret, // Only shown once
         },
         keys: keyPair ? {
           keyId: keyPair.keyId,
@@ -99,24 +87,14 @@ class ClientAuthController {
     const { email, password } = req.body;
 
     try {
-      // Find client
-      const clientQuery = `
-        SELECT id, email, password_hash, name, company_name, plan_type, 
-               is_active, email_verified, last_login
-        FROM clients 
-        WHERE email = $1
-      `;
+      const client = await Client.findByEmail(email);
 
-      const result = await database.query(clientQuery, [email]);
-
-      if (result.rows.length === 0) {
+      if (!client) {
         return res.status(401).json({
           error: 'Invalid credentials',
           code: 'INVALID_CREDENTIALS',
         });
       }
-
-      const client = result.rows[0];
 
       if (!client.is_active) {
         return res.status(401).json({
@@ -125,7 +103,6 @@ class ClientAuthController {
         });
       }
 
-      // Verify password
       const isValidPassword = await crypto.comparePassword(password, client.password_hash);
 
       if (!isValidPassword) {
@@ -135,64 +112,46 @@ class ClientAuthController {
         });
       }
 
-      // Generate tokens
-      const accessToken = await jwtService.generateAccessToken({
-        sub: client.id,
-        email: client.email,
-        type: 'client'
-      });
+      const accessToken = await jwtService.generateAccessToken(
+        client.id,
+        'client',
+        client.id // Pass the database ID as clientId
+      );
 
       const refreshToken = crypto.randomString(64);
 
-      // Create session with correct column names (polymorphic)
-      const sessionQuery = `
-        INSERT INTO sessions (
-          session_type, entity_id, refresh_token,
-          expires_at, ip_address
-        )
-        VALUES ($1, $2, $3, $4, $5)
-        RETURNING id
-      `;
+      await Session.create({
+        session_type: 'client',
+        entity_id: client.id,
+        refresh_token: refreshToken,
+        ip_address: req.ip,
+        user_agent: req.headers['user-agent']
+      });
 
-      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days for refresh token
-
-      await database.query(sessionQuery, [
-        'client',
-        client.id,
-        refreshToken,
-        expiresAt,
-        req.ip
-      ]);
-
-      // Update last login
-      await database.query(
-        'UPDATE clients SET last_login = NOW() WHERE id = $1',
-        [client.id]
-      );
+      await Client.update(client.id, { last_login: new Date() });
 
       logger.info('Client login successful', { clientId: client.id, email });
-      // Add debug logging
-      console.log('=== BACKEND LOGIN DEBUG ===');
-      console.log('Access token generated:', accessToken);
-      console.log('Access token type:', typeof accessToken);
-      console.log('Access token length:', accessToken?.length);
-      console.log('Client ID:', client.id);
+
+      res.cookie('refresh_token', refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+      });
 
       res.json({
         access_token: accessToken,
-        refresh_token: refreshToken,
+        refresh_token: refreshToken, // Still returned for compatibility
         token_type: 'Bearer',
         expires_in: 7200,
         client: {
           id: client.id,
           email: client.email,
           name: client.name,
-          company_name: client.company_name,
+          organization_name: client.organization_name,
           plan_type: client.plan_type,
-          email_verified: client.email_verified,
         },
       });
-
 
     } catch (error) {
       logger.error('Client login error:', error);
@@ -202,25 +161,16 @@ class ClientAuthController {
 
   async getProfile(req, res, next) {
     try {
-      const clientQuery = `
-        SELECT 
-          id, name, email, company_name, website, phone, plan_type,
-          subscription_status, billing_email, is_active, email_verified,
-          last_login, created_at, updated_at
-        FROM clients 
-        WHERE id = $1
-      `;
+      const client = await Client.findById(req.client.id);
 
-      const result = await database.query(clientQuery, [req.client.id]);
-
-      if (result.rows.length === 0) {
+      if (!client) {
         return res.status(404).json({
           error: 'Client not found',
           code: 'CLIENT_NOT_FOUND',
         });
       }
 
-      res.json({ client: result.rows[0] });
+      res.json({ client });
 
     } catch (error) {
       logger.error('Get client profile error:', error);
@@ -230,48 +180,10 @@ class ClientAuthController {
 
   async getDashboardStats(req, res, next) {
     try {
-      const clientId = req.client.id;
-
-      const statsQueries = {
-        totalApplications: `
-          SELECT COUNT(*) as count 
-          FROM client_applications 
-          WHERE client_id = $1 AND is_active = true
-        `,
-        totalUsers: `
-          SELECT COUNT(*) as count 
-          FROM users 
-          WHERE client_id = $1 AND is_active = true
-        `,
-        activeSessions: `
-          SELECT COUNT(*) as count 
-          FROM sessions 
-          WHERE client_id = $1 AND expires_at > NOW() AND revoked = false
-        `,
-        recentLogins: `
-          SELECT COUNT(*) as count 
-          FROM users 
-          WHERE client_id = $1 AND last_login > NOW() - INTERVAL '24 hours'
-        `,
-        monthlyActiveUsers: `
-          SELECT COUNT(DISTINCT user_id) as count
-          FROM sessions s
-          JOIN users u ON s.user_id = u.id
-          WHERE u.client_id = $1 AND s.created_at > NOW() - INTERVAL '30 days'
-        `
-      };
-
-      const stats = {};
-
-      for (const [key, query] of Object.entries(statsQueries)) {
-        const result = await database.query(query, [clientId]);
-        stats[key] = result.rows[0];
-      }
-
+      const stats = await Client.getStats(req.client.id);
       res.json({ stats });
-
     } catch (error) {
-      logger.error('Get client dashboard stats error:', error);
+      logger.error('Get dashboard stats error:', error);
       next(error);
     }
   }
@@ -284,11 +196,11 @@ class ClientAuthController {
       const query = `
         SELECT 
           ca.*,
-          COUNT(u.id) as user_count,
-          COUNT(s.id) as active_session_count
+          COUNT(DISTINCT u.id) as user_count,
+          COUNT(DISTINCT s.id) as active_session_count
         FROM client_applications ca
         LEFT JOIN users u ON ca.id = u.application_id AND u.is_active = true
-        LEFT JOIN sessions s ON ca.id = s.application_id AND s.expires_at > NOW() AND s.revoked = false
+        LEFT JOIN sessions s ON u.id = s.entity_id AND s.session_type = 'user' AND s.expires_at > NOW() AND s.revoked = false
         WHERE ca.client_id = $1
         GROUP BY ca.id
         ORDER BY ca.created_at DESC
@@ -324,59 +236,41 @@ class ClientAuthController {
 
   async createApplication(req, res, next) {
     const {
-      name, description, auth_mode = 'basic',
-      allowed_domains = [], redirect_urls = [],
-      webhook_url, role_request_webhook,
-      roles, default_role_id
+      name, description, auth_mode = 'jwt',
+      allowed_origins = [], redirect_url,
+      roles_config, default_role
     } = req.body;
 
     try {
-      // Generate application credentials
-      const clientAuthKey = 'app_' + crypto.randomString(16);
-      const clientSecret = crypto.randomString(32);
-      const clientSecretHash = await crypto.hashPassword(clientSecret);
-
-      // Process roles logic (from simple controller)
-      let processedRoles = [];
-      let defaultRole = 'user';
-
-      if (auth_mode === 'advanced' && roles && Array.isArray(roles)) {
-        processedRoles = roles.filter(role => role.name && role.displayName);
-
-        // Find default role
-        const defaultRoleObj = processedRoles.find(role => role.id === default_role_id);
-        if (defaultRoleObj) {
-          defaultRole = defaultRoleObj.name;
-        }
-      } else {
-        // Basic auth mode - use simple roles
-        processedRoles = [
-          { name: 'user', displayName: 'User', hierarchy: 1 },
-          { name: 'admin', displayName: 'Admin', hierarchy: 2 }
-        ];
-        defaultRole = 'user';
-      }
+      const application_secret = crypto.generateRandomToken(32);
 
       const insertQuery = `
         INSERT INTO client_applications (
-          client_id, name, description, auth_mode, allowed_domains, 
-          redirect_urls, client_id_key, client_secret_hash, 
-          default_role, roles_config, webhook_url, role_request_webhook, is_active
+          client_id, name, description, application_secret, auth_mode,
+          allowed_origins, redirect_url, roles_config, default_role, is_active
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         RETURNING *
       `;
 
       const result = await database.query(insertQuery, [
-        req.client.id, name, description, auth_mode,
-        JSON.stringify(allowed_domains), JSON.stringify(redirect_urls),
-        clientAuthKey, clientSecretHash,
-        defaultRole, JSON.stringify(processedRoles),
-        webhook_url, role_request_webhook,
+        req.client.id, name, description, application_secret, auth_mode,
+        Array.isArray(allowed_origins) ? JSON.stringify(allowed_origins) : allowed_origins,
+        redirect_url,
+        roles_config ? (typeof roles_config === 'string' ? roles_config : JSON.stringify(roles_config)) : null,
+        default_role || 'user',
         true
       ]);
 
       const application = result.rows[0];
+
+      // Auto-generate RSA key pair for the application
+      try {
+        await ApplicationKeyService.generateKeyPair(application.id);
+        logger.info('RSA key pair generated for new application', { applicationId: application.id });
+      } catch (keyError) {
+        logger.error('Failed to generate RSA key pair for new application:', keyError);
+      }
 
       logger.info('Application created', {
         applicationId: application.id,
@@ -385,15 +279,39 @@ class ClientAuthController {
       });
 
       res.status(201).json({
+        success: true,
+        message: 'Application created successfully',
         application: {
           ...application,
-          client_secret: clientSecret, // Only shown once
-        },
-        message: 'Application created successfully. Please save the client secret.',
+          application_secret // Return raw secret once
+        }
       });
 
     } catch (error) {
       logger.error('Create application error:', error);
+      next(error);
+    }
+  }
+
+  async regenerateClientSecret(req, res, next) {
+    try {
+      const client = await Client.regenerateClientSecret(req.client.id);
+      if (!client) {
+        return res.status(404).json({
+          error: 'Client not found',
+          code: 'CLIENT_NOT_FOUND'
+        });
+      }
+
+      logger.info('Client secret regenerated', { clientId: req.client.id });
+
+      res.json({
+        success: true,
+        message: 'Client secret regenerated successfully. Please save the new secret.',
+        client_secret: client.client_secret
+      });
+    } catch (error) {
+      logger.error('Regenerate client secret error:', error);
       next(error);
     }
   }
@@ -403,15 +321,9 @@ class ClientAuthController {
       const { id } = req.params;
 
       const query = `
-        SELECT 
-          ca.*,
-          COUNT(u.id) as user_count,
-          COUNT(s.id) as active_session_count
+        SELECT ca.*
         FROM client_applications ca
-        LEFT JOIN users u ON ca.id = u.application_id AND u.is_active = true
-        LEFT JOIN sessions s ON ca.id = s.application_id AND s.expires_at > NOW() AND s.revoked = false
         WHERE ca.id = $1 AND ca.client_id = $2
-        GROUP BY ca.id
       `;
 
       const result = await database.query(query, [id, req.client.id]);
@@ -423,7 +335,7 @@ class ClientAuthController {
         });
       }
 
-      res.json({ application: result.rows[0] });
+      res.json({ success: true, application: result.rows[0] });
 
     } catch (error) {
       logger.error('Get application error:', error);
@@ -437,8 +349,9 @@ class ClientAuthController {
       const updates = req.body;
 
       const allowedFields = [
-        'name', 'description', 'allowed_domains', 'redirect_urls',
-        'default_user_role', 'available_roles', 'custom_roles', 'settings'
+        'name', 'description', 'allowed_origins', 'redirect_url',
+        'main_page_url', 'webhook_url', 'role_request_webhook',
+        'default_role', 'roles_config', 'is_active'
       ];
 
       const updateFields = [];
@@ -450,8 +363,8 @@ class ClientAuthController {
           paramCount++;
           updateFields.push(`${field} = $${paramCount}`);
 
-          if (['allowed_domains', 'redirect_urls', 'available_roles', 'custom_roles', 'settings'].includes(field)) {
-            updateValues.push(JSON.stringify(updates[field]));
+          if (field === 'roles_config') {
+            updateValues.push(typeof updates[field] === 'string' ? updates[field] : JSON.stringify(updates[field]));
           } else {
             updateValues.push(updates[field]);
           }
@@ -493,7 +406,7 @@ class ClientAuthController {
         clientId: req.client.id
       });
 
-      res.json({ application: result.rows[0] });
+      res.json({ success: true, application: result.rows[0] });
 
     } catch (error) {
       logger.error('Update application error:', error);
@@ -550,18 +463,12 @@ class ClientAuthController {
   async regenerateApplicationSecret(req, res, next) {
     try {
       const { id } = req.params;
+      const newSecret = crypto.generateRandomToken(32);
 
-      const newClientSecret = crypto.randomString(32);
-      const newClientSecretHash = await crypto.hashPassword(newClientSecret);
-
-      const query = `
-        UPDATE client_applications 
-        SET client_secret_hash = $1, updated_at = NOW()
-        WHERE id = $2 AND client_id = $3
-        RETURNING id, name, client_id_key
-      `;
-
-      const result = await database.query(query, [newClientSecretHash, id, req.client.id]);
+      const result = await database.query(
+        'UPDATE client_applications SET application_secret = $1, updated_at = NOW() WHERE id = $2 AND client_id = $3 RETURNING id',
+        [newSecret, id, req.client.id]
+      );
 
       if (result.rows.length === 0) {
         return res.status(404).json({
@@ -576,13 +483,9 @@ class ClientAuthController {
       });
 
       res.json({
-        application: {
-          id: result.rows[0].id,
-          name: result.rows[0].name,
-          client_id_key: result.rows[0].client_id_key,
-          client_secret: newClientSecret, // Only shown once
-        },
+        success: true,
         message: 'Application secret regenerated successfully. Please save the new secret.',
+        application_secret: newSecret
       });
 
     } catch (error) {
@@ -591,18 +494,91 @@ class ClientAuthController {
     }
   }
 
-  async logout(req, res, next) {
+  async refreshToken(req, res, next) {
+    const refreshToken = req.body.refresh_token || req.cookies?.refresh_token;
+
     try {
-      // Revoke current session
-      await database.query(
-        'UPDATE sessions SET revoked = true, revoked_at = NOW() WHERE entity_id = $1 AND session_type = $2',
-        [req.client.id, 'client']
+      if (!refreshToken) {
+        return res.status(401).json({
+          error: 'Refresh token is required',
+          code: 'REFRESH_TOKEN_REQUIRED'
+        });
+      }
+
+      const session = await Session.findByRefreshToken(refreshToken);
+
+      if (!session || session.session_type !== 'client' || session.revoked) {
+        return res.status(401).json({
+          error: 'Invalid or expired refresh token',
+          code: 'INVALID_REFRESH_TOKEN'
+        });
+      }
+
+      if (new Date(session.expires_at) < new Date()) {
+        return res.status(401).json({
+          error: 'Refresh token has expired',
+          code: 'REFRESH_TOKEN_EXPIRED'
+        });
+      }
+
+      const client = await Client.findById(session.entity_id);
+      if (!client || !client.is_active) {
+        return res.status(401).json({
+          error: 'Client account is inactive or not found',
+          code: 'CLIENT_INACTIVE'
+        });
+      }
+
+      const accessToken = await jwtService.generateAccessToken(
+        client.id,
+        'client',
+        client.id
       );
 
-      logger.info('Client logout successful', { clientId: req.client.id });
+      const newRefreshToken = crypto.randomString(64);
 
+      // Rotate refresh token
+      await Session.create({
+        session_type: 'client',
+        entity_id: client.id,
+        refresh_token: newRefreshToken,
+        ip_address: req.ip,
+        user_agent: req.headers['user-agent']
+      });
+
+      await Session.revoke(refreshToken);
+
+      res.cookie('refresh_token', newRefreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 7 * 24 * 60 * 60 * 1000
+      });
+
+      res.json({
+        access_token: accessToken,
+        refresh_token: newRefreshToken,
+        token_type: 'Bearer',
+        expires_in: 7200
+      });
+
+    } catch (error) {
+      logger.error('Client token refresh error:', error);
+      next(error);
+    }
+  }
+
+  async logout(req, res, next) {
+    try {
+      const refreshToken = req.body.refresh_token || req.cookies?.refresh_token;
+
+      if (refreshToken) {
+        await Session.revoke(refreshToken);
+      }
+
+      res.clearCookie('refresh_token');
+      logger.info('Client logout successful', { clientId: req.client?.id });
       res.json({ message: 'Logged out successfully' });
-
     } catch (error) {
       logger.error('Client logout error:', error);
       next(error);

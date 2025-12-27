@@ -15,7 +15,7 @@ class Database {
     if (process.env.DATABASE_URL) {
       const { parse } = require('pg-connection-string');
       const connectionConfig = parse(process.env.DATABASE_URL);
-      
+
       return {
         host: connectionConfig.host,
         port: connectionConfig.port,
@@ -49,24 +49,24 @@ class Database {
     }
 
     this.pool = new Pool(this.config);
-    
+
     // Enhanced error handling with retries
     while (this.connectionAttempts < this.maxConnectionAttempts) {
       try {
         this.connectionAttempts++;
         logger.info(`Connecting to Supabase (attempt ${this.connectionAttempts})`);
-        
+
         const client = await this.pool.connect();
         const result = await client.query('SELECT NOW()');
         client.release();
-        
+
         logger.info('✅ Connected to Supabase successfully');
         this.connectionAttempts = 0;
         return this.pool;
-        
+
       } catch (error) {
         logger.error(`❌ Connection attempt ${this.connectionAttempts} failed:`, error.message);
-        
+
         if (this.connectionAttempts < this.maxConnectionAttempts) {
           await new Promise(resolve => setTimeout(resolve, 2000));
         } else {
@@ -86,10 +86,10 @@ class Database {
     try {
       const result = await this.pool.query(text, params);
       const duration = Date.now() - start;
-      logger.database(`Query executed in ${duration}ms`, { 
-        text: text.substring(0, 100) + (text.length > 100 ? '...' : ''), 
+      logger.database(`Query executed in ${duration}ms`, {
+        text: text.substring(0, 100) + (text.length > 100 ? '...' : ''),
         duration,
-        rowCount: result.rowCount 
+        rowCount: result.rowCount
       });
       return result;
     } catch (error) {
@@ -99,6 +99,17 @@ class Database {
       });
       throw error;
     }
+  }
+
+  /**
+   * Get a single client from the pool for manual transactions
+   * @returns {Promise<import('pg').PoolClient>}
+   */
+  async getClient() {
+    if (!this.pool) {
+      await this.connect();
+    }
+    return await this.pool.connect();
   }
 
   async close() {

@@ -1,4 +1,3 @@
-const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const crypto = require('../utils/crypto');
 const database = require('../utils/database');
@@ -70,7 +69,7 @@ class AdminController {
       }
 
       // Hash password for storage
-      const passwordHash = await bcrypt.hash(password, 12);
+      const passwordHash = await crypto.hashPassword(password);
 
       // Create admin request
       const query = `
@@ -258,6 +257,13 @@ class AdminController {
       );
 
       logger.info('Admin login successful', { adminId: admin.id, email, provider: 'email' });
+
+      res.cookie('refresh_token', refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 7 * 24 * 60 * 60 * 1000
+      });
 
       res.json({
         success: true,
@@ -671,18 +677,121 @@ class AdminController {
     }
   }
 
-  async logout(req, res, next) {
+  async refreshToken(req, res, next) {
+    const refreshToken = req.body.refresh_token || req.cookies?.refresh_token;
+
     try {
-      // Revoke current session
-      await database.query(
-        'UPDATE sessions SET revoked = true, revoked_at = NOW() WHERE entity_id = $1 AND session_type = $2',
-        [req.admin.id, 'admin']
+      if (!refreshToken) {
+        return res.status(401).json({
+          error: 'Refresh token is required',
+          code: 'REFRESH_TOKEN_REQUIRED'
+        });
+      }
+
+      // Find session
+      const sessionQuery = `
+        SELECT * FROM sessions 
+        WHERE refresh_token = $1 AND session_type = 'admin' AND revoked = false
+      `;
+      const sessionResult = await database.query(sessionQuery, [refreshToken]);
+      const session = sessionResult.rows[0];
+
+      if (!session) {
+        return res.status(401).json({
+          error: 'Invalid or expired refresh token',
+          code: 'INVALID_REFRESH_TOKEN'
+        });
+      }
+
+      if (new Date(session.expires_at) < new Date()) {
+        return res.status(401).json({
+          error: 'Refresh token has expired',
+          code: 'REFRESH_TOKEN_EXPIRED'
+        });
+      }
+
+      // Find admin
+      const adminQuery = 'SELECT id, email, name, role FROM admins WHERE id = $1 AND is_active = true';
+      const adminResult = await database.query(adminQuery, [session.entity_id]);
+      const admin = adminResult.rows[0];
+
+      if (!admin) {
+        return res.status(401).json({
+          error: 'Admin account is inactive or not found',
+          code: 'ADMIN_INACTIVE'
+        });
+      }
+
+      // Generate new tokens
+      const accessToken = jwt.sign(
+        {
+          sub: admin.id,
+          email: admin.email,
+          name: admin.name,
+          type: 'admin',
+          iat: Math.floor(Date.now() / 1000)
+        },
+        process.env.JWT_SECRET,
+        { expiresIn: '24h' }
       );
 
-      logger.info('Admin logout successful', { adminId: req.admin.id });
+      const newRefreshToken = jwt.sign(
+        {
+          sub: admin.id,
+          type: 'admin_refresh',
+          iat: Math.floor(Date.now() / 1000)
+        },
+        process.env.JWT_SECRET,
+        { expiresIn: '7d' }
+      );
 
+      // Rotate session
+      await database.query(
+        'UPDATE sessions SET revoked = true, revoked_at = NOW() WHERE refresh_token = $1',
+        [refreshToken]
+      );
+
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      await database.query(`
+        INSERT INTO sessions (session_type, entity_id, refresh_token, expires_at, ip_address, user_agent)
+        VALUES ($1, $2, $3, $4, $5, $6)
+      `, ['admin', admin.id, newRefreshToken, expiresAt, req.ip, req.get('User-Agent')]);
+
+      res.cookie('refresh_token', newRefreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 7 * 24 * 60 * 60 * 1000
+      });
+
+      res.json({
+        success: true,
+        access_token: accessToken,
+        refresh_token: newRefreshToken,
+        token_type: 'Bearer',
+        expires_in: 86400
+      });
+
+    } catch (error) {
+      logger.error('Admin token refresh error:', error);
+      next(error);
+    }
+  }
+
+  async logout(req, res, next) {
+    try {
+      const refreshToken = req.body.refresh_token || req.cookies?.refresh_token;
+
+      if (refreshToken) {
+        await database.query(
+          'UPDATE sessions SET revoked = true, revoked_at = NOW() WHERE refresh_token = $1 AND session_type = $2',
+          [refreshToken, 'admin']
+        );
+      }
+
+      res.clearCookie('refresh_token');
+      logger.info('Admin logout successful', { adminId: req.admin?.id });
       res.json({ message: 'Logged out successfully' });
-
     } catch (error) {
       logger.error('Admin logout error:', error);
       next(error);

@@ -4,15 +4,15 @@ JWT Authentication as a Service - Backend API server built with Node.js, Express
 
 ## Features
 
-- 🔐 JWT-based authentication with RS256 signing
-- 👥 Multi-tenant client management
-- 🔄 Refresh token rotation
-- 📧 Email verification and password reset
-- 🪝 Webhook integration for custom claims
-- 🚦 Rate limiting with Redis support
-- 📊 Session management and audit logging
+- 🔐 Multi-tenant JWT authentication with per-application RSA-2048 keys
+- 🔑 RSA private keys encrypted at rest with AES-256-GCM
+- 👥 Multi-tenant client and application management
+- �️ Robust JWKS (JSON Web Key Set) endpoints for public key discovery
+- �🔄 Refresh token rotation with HTTP-only cookie support
+- 📧 Email verification and password reset (Admin/Client/User)
+- 🪝 Webhook integration for custom user claims
+- 🚦 Rate limiting and audit logging
 - 🔗 OAuth support (Google, GitHub)
-- 🛡️ Security best practices (helmet, CORS, etc.)
 
 ## Prerequisites
 
@@ -77,47 +77,32 @@ npm run test:integration
 
 ## API Endpoints
 
-### Health Check
-- `GET /health` - Server health status
+### User Auth (End-Users of Applications)
+- `POST /api/user/register` - Register new application user
+- `POST /api/user/login` - User login
+- `POST /api/user/refresh-token` - Refresh access token (Cookie-based)
+- `POST /api/user/logout` - Logout user
+- `GET /api/user/profile` - Get current user info
 
-### Authentication
-- `POST /api/auth/register` - Register new user
-- `POST /api/auth/login` - User login
-- `POST /api/auth/refresh` - Refresh access token
-- `POST /api/auth/logout` - Logout user
-- `POST /api/auth/verify` - Verify JWT token
-- `GET /api/auth/me` - Get current user info
-- `POST /api/auth/forgot-password` - Request password reset
-- `POST /api/auth/reset-password` - Reset password
+### Client Auth (Application Owners)
+- `POST /api/client/register` - Register as a client
+- `POST /api/client/login` - Client login
+- `POST /api/client/refresh-token` - Refresh client session (Cookie-based)
+- `POST /api/client/logout` - Client logout
+- `GET /api/client/profile` - Get client profile
+- `GET /api/client/applications` - List applications
+- `POST /api/client/applications` - Create application
+- `GET /api/client/applications/:id/jwks` - Get application JWKS
 
-### OAuth
-- `GET /api/auth/oauth/google` - Initiate Google OAuth
-- `GET /api/auth/oauth/google/callback` - Google OAuth callback
-- `GET /api/auth/oauth/github` - Initiate GitHub OAuth
-- `GET /api/auth/oauth/github/callback` - GitHub OAuth callback
+### Admin Auth (SaaS Platform Admins)
+- `POST /api/admin/login` - Admin login
+- `POST /api/admin/refresh-token` - Refresh admin session (Cookie-based)
+- `GET /api/admin/clients` - List all clients
+- `GET /api/admin/dashboard/stats` - Platform statistics
 
-### Client Management (Admin)
-- `POST /api/clients` - Create new client
-- `GET /api/clients` - List clients
-- `GET /api/clients/:id` - Get client details
-- `PUT /api/clients/:id` - Update client
-- `DELETE /api/clients/:id` - Delete client
-- `POST /api/clients/:id/regenerate-key` - Regenerate API key
-
-### User Management
-- `GET /api/users/:client_id/users` - List users
-- `GET /api/users/:client_id/users/:user_id` - Get user details
-- `PUT /api/users/:client_id/users/:user_id` - Update user
-- `GET /api/users/:client_id/users/:user_id/sessions` - Get user sessions
-- `DELETE /api/users/:client_id/users/:user_id/sessions/:session_id` - Revoke session
-
-### Webhooks
-- `POST /api/webhooks/:client_id/test` - Test webhook
-- `GET /api/webhooks/:client_id/logs` - Get webhook logs
-- `GET /api/webhooks/:client_id/stats` - Get webhook statistics
-
-### JWKS
-- `GET /.well-known/jwks.json` - Public key for JWT verification
+### OAuth (User)
+- `GET /api/auth/social/:provider` - Initiate OAuth (google/github)
+- `GET /api/auth/social/:provider/callback` - OAuth callback
 
 ## Database Migrations
 
@@ -143,12 +128,13 @@ See `.env.example` for all available configuration options.
 - `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` - Database connection
 - `PORT` - Server port (default: 8000)
 - `NODE_ENV` - Environment (development/production/test)
-
-### Optional Variables
-- `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY` - JWT signing keys (auto-generated if not provided)
-- `REDIS_URL` - Redis connection for distributed rate limiting
+- `KEY_ENCRYPTION_KEY` - 32-byte key for AES-256-GCM encryption of private keys
+- `JWT_SECRET` - Secret for session signatures (legacy tokens)
+- `SESSION_SECRET` - Secret for express sessions
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` - Google OAuth credentials
+- `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` - GitHub OAuth credentials
 - `SMTP_*` - Email configuration for notifications
-- `GOOGLE_CLIENT_ID`, `GITHUB_CLIENT_ID` - OAuth configuration
+- `REDIS_URL` - Redis connection for rate limiting (optional)
 
 ## Project Structure
 

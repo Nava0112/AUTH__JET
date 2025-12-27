@@ -9,7 +9,7 @@ const logger = require('../utils/logger');
 const authenticateAdmin = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
-    
+
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({
         error: 'Admin access token required',
@@ -21,15 +21,15 @@ const authenticateAdmin = async (req, res, next) => {
 
     try {
       const decoded = await jwtService.verifyToken(token);
-      
+
       // Verify admin exists and is active
       const adminQuery = `
         SELECT * FROM admins 
         WHERE id = $1 AND is_active = true
       `;
-      
+
       const adminResult = await database.query(adminQuery, [decoded.sub]);
-      
+
       if (adminResult.rows.length === 0) {
         return res.status(401).json({
           error: 'Admin not found or inactive',
@@ -38,16 +38,16 @@ const authenticateAdmin = async (req, res, next) => {
       }
 
       const admin = adminResult.rows[0];
-      
+
       // Verify session exists and is valid
       const sessionQuery = `
         SELECT * FROM sessions 
-        WHERE admin_id = $1 AND session_type = 'admin' 
+        WHERE entity_id = $1 AND session_type = 'admin' 
         AND expires_at > NOW() AND revoked = false
       `;
-      
+
       const sessionResult = await database.query(sessionQuery, [admin.id]);
-      
+
       if (sessionResult.rows.length === 0) {
         return res.status(401).json({
           error: 'Invalid or expired admin session',
@@ -67,7 +67,7 @@ const authenticateAdmin = async (req, res, next) => {
       next();
     } catch (jwtError) {
       logger.warn('Admin JWT verification failed:', jwtError.message);
-      
+
       return res.status(401).json({
         error: 'Invalid or expired admin token',
         code: 'INVALID_ADMIN_TOKEN',
@@ -89,7 +89,7 @@ const authenticateAdmin = async (req, res, next) => {
 const authenticateClient = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
-    
+
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({
         error: 'Client access token required',
@@ -100,21 +100,17 @@ const authenticateClient = async (req, res, next) => {
     const token = authHeader.substring(7);
 
     try {
-      // Client tokens are signed with platform secret (not client-specific keys)
-      const jwt = require('jsonwebtoken');
-      const decoded = jwt.verify(
-        token, 
-        process.env.JWT_SECRET || 'default-jwt-secret-change-in-production'
-      );
-      
+      // Use unified jwtService for verification
+      const decoded = await jwtService.verifyToken(token);
+
       // Verify client exists and is active
       const clientQuery = `
         SELECT * FROM clients 
         WHERE id = $1 AND is_active = true
       `;
-      
+
       const clientResult = await database.query(clientQuery, [decoded.sub]);
-      
+
       if (clientResult.rows.length === 0) {
         return res.status(401).json({
           error: 'Client not found or inactive',
@@ -127,19 +123,19 @@ const authenticateClient = async (req, res, next) => {
       // Verify session exists and is valid
       const sessionQuery = `
         SELECT * FROM sessions 
-        WHERE client_id = $1 AND session_type = 'client' 
+        WHERE entity_id = $1 AND session_type = 'client' 
         AND expires_at > NOW() AND revoked = false
       `;
-      
+
       const sessionResult = await database.query(sessionQuery, [client.id]);
-      
+
       if (sessionResult.rows.length === 0) {
         return res.status(401).json({
           error: 'Invalid or expired client session',
           code: 'INVALID_CLIENT_SESSION',
         });
       }
-  
+
       // Attach client info to request
       req.client = {
         id: client.id,
@@ -153,7 +149,7 @@ const authenticateClient = async (req, res, next) => {
       next();
     } catch (jwtError) {
       logger.warn('Client JWT verification failed:', jwtError.message);
-      
+
       return res.status(401).json({
         error: 'Invalid or expired client token',
         code: 'INVALID_CLIENT_TOKEN',
@@ -175,7 +171,7 @@ const authenticateClient = async (req, res, next) => {
 const authenticateUser = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
-    
+
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({
         error: 'User access token required',
@@ -187,7 +183,7 @@ const authenticateUser = async (req, res, next) => {
 
     try {
       const decoded = await jwtService.verifyToken(token);
-      
+
       // Verify user exists and is active
       // In authenticateUser - SQL Injection Risk
       const userQuery = `
@@ -197,9 +193,9 @@ const authenticateUser = async (req, res, next) => {
         JOIN client_applications ca ON u.application_id = ca.id
         WHERE u.id = $1 AND u.is_active = true AND c.is_active = true AND ca.is_active = true
       `;
-      
+
       const userResult = await database.query(userQuery, [decoded.sub]);
-      
+
       if (userResult.rows.length === 0) {
         return res.status(401).json({
           error: 'User not found or inactive',
@@ -208,23 +204,23 @@ const authenticateUser = async (req, res, next) => {
       }
 
       const user = userResult.rows[0];
-      
+
       // Verify session exists and is valid
       const sessionQuery = `
         SELECT * FROM sessions 
-        WHERE user_id = $1 AND session_type = 'user' 
+        WHERE entity_id = $1 AND session_type = 'user' 
         AND expires_at > NOW() AND revoked = false
       `;
 
       const sessionResult = await database.query(sessionQuery, [user.id]);
-      
+
       if (sessionResult.rows.length === 0) {
         return res.status(401).json({
           error: 'Invalid or expired user session',
           code: 'INVALID_USER_SESSION',
         });
       }
-      
+
       // Attach user info to request
       req.user = {
         id: user.id,
@@ -242,7 +238,7 @@ const authenticateUser = async (req, res, next) => {
       next();
     } catch (jwtError) {
       logger.warn('User JWT verification failed:', jwtError.message);
-      
+
       return res.status(401).json({
         error: 'Invalid or expired user token',
         code: 'INVALID_USER_TOKEN',
@@ -265,7 +261,7 @@ const authenticateApplication = async (req, res, next) => {
   try {
     const clientId = req.headers['x-client-id'];
     const clientSecret = req.headers['x-client-secret'];
-    
+
     if (!clientId || !clientSecret) {
       return res.status(401).json({
         error: 'Application credentials required',
@@ -274,15 +270,15 @@ const authenticateApplication = async (req, res, next) => {
     }
 
     // Verify application exists and is active
-      const appQuery = `
+    const appQuery = `
     SELECT ca.*, c.name as client_name, c.is_active as client_active
     FROM client_applications ca
     JOIN clients c ON ca.client_id = c.id
     WHERE c.client_id = $1 AND ca.is_active = true AND c.is_active = true
   `;
-    
+
     const appResult = await database.query(appQuery, [clientId]);
-    
+
     if (appResult.rows.length === 0) {
       return res.status(401).json({
         error: 'Application not found or inactive',
@@ -291,11 +287,11 @@ const authenticateApplication = async (req, res, next) => {
     }
 
     const application = appResult.rows[0];
-    
+
     // Verify client secret
     const crypto = require('../utils/crypto');
     const isValidSecret = await crypto.comparePassword(clientSecret, application.client_secret_hash);
-    
+
     if (!isValidSecret) {
       return res.status(401).json({
         error: 'Invalid application credentials',
@@ -330,7 +326,7 @@ const authenticateApplication = async (req, res, next) => {
 const requireRole = (allowedRoles, userType = 'user') => {
   return (req, res, next) => {
     let user;
-    
+
     switch (userType) {
       case 'admin':
         user = req.admin;

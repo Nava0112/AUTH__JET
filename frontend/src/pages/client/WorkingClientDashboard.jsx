@@ -8,7 +8,59 @@ const WorkingClientDashboard = () => {
   const [activeTab, setActiveTab] = useState('overview');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
+  // JWKS Modal state
+  const [selectedApp, setSelectedApp] = useState(null);
+  const [jwks, setJwks] = useState(null);
+  const [jwksLoading, setJwksLoading] = useState(false);
+
   const navigate = useNavigate();
+
+  const fetchJwks = async (appId) => {
+    setJwksLoading(true);
+    setJwks(null);
+    try {
+      const token = localStorage.getItem('clientToken');
+      const response = await fetch(`http://localhost:8000/api/client/applications/${appId}/jwks`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      const data = await response.json();
+      setJwks(data.keys || data);
+    } catch (err) {
+      console.error('Failed to fetch JWKS:', err);
+      setJwks({ error: 'Failed to load JWKS' });
+    } finally {
+      setJwksLoading(false);
+    }
+  };
+
+  const handleGenerateKeys = async (appId) => {
+    setJwksLoading(true);
+    try {
+      const token = localStorage.getItem('clientToken');
+      const response = await fetch(`http://localhost:8000/api/client/applications/${appId}/keys/rotate`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to generate keys');
+      }
+
+      // Refresh JWKS after generation
+      await fetchJwks(appId);
+      alert('RSA Keys generated successfully for ' + selectedApp.name);
+    } catch (err) {
+      console.error('Failed to generate keys:', err);
+      alert('Error generating keys: ' + err.message);
+    } finally {
+      setJwksLoading(false);
+    }
+  };
 
   useEffect(() => {
     // Check if client is logged in
@@ -17,7 +69,7 @@ const WorkingClientDashboard = () => {
       navigate('/');
       return;
     }
-    
+
     setClient(JSON.parse(clientData));
     fetchDashboardStats();
   }, [navigate]);
@@ -28,24 +80,24 @@ const WorkingClientDashboard = () => {
       if (!token) {
         throw new Error('No authentication token found. Please login again.');
       }
-  
+
       const headers = {
         'Authorization': `Bearer ${token}`
       };
-  
+
       const [statsResponse, appsResponse] = await Promise.all([
         fetch('http://localhost:8000/api/client/dashboard/stats', { headers }),
         fetch('http://localhost:8000/api/client/applications', { headers })
       ]);
-      
+
       const statsData = await statsResponse.json();
       const appsData = await appsResponse.json();
-      
+
       console.log('=== DASHBOARD DEBUG ===');
       console.log('Stats response:', statsData);
       console.log('Apps response:', appsData);
       console.log('=== END DEBUG ===');
-      
+
       // Handle stats data
       if (statsResponse.ok) {
         // The backend might return stats directly or in a stats property
@@ -53,7 +105,7 @@ const WorkingClientDashboard = () => {
       } else {
         throw new Error(statsData.error || 'Failed to fetch stats');
       }
-      
+
       // Handle applications data - FIX THIS PART
       if (appsResponse.ok) {
         // The backend might return applications as 'clients' or 'applications'
@@ -69,7 +121,7 @@ const WorkingClientDashboard = () => {
       } else {
         throw new Error(appsData.error || 'Failed to fetch applications');
       }
-      
+
     } catch (err) {
       setError('Failed to load dashboard data: ' + err.message);
       console.error('Dashboard fetch error:', err);
@@ -90,7 +142,7 @@ const WorkingClientDashboard = () => {
         alert('No token found. Please login first.');
         return;
       }
-  
+
       const response = await fetch(`http://localhost:8000/api/client/${endpoint}`, {
         headers: {
           'Authorization': `Bearer ${token}`
@@ -179,21 +231,19 @@ const WorkingClientDashboard = () => {
             <nav className="-mb-px flex space-x-8 px-6" aria-label="Tabs">
               <button
                 onClick={() => setActiveTab('overview')}
-                className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                  activeTab === 'overview'
-                    ? 'border-indigo-500 text-indigo-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
+                className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'overview'
+                  ? 'border-indigo-500 text-indigo-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
               >
                 📊 Overview
               </button>
               <button
                 onClick={() => setActiveTab('applications')}
-                className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                  activeTab === 'applications'
-                    ? 'border-indigo-500 text-indigo-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
+                className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'applications'
+                  ? 'border-indigo-500 text-indigo-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
               >
                 🚀 Applications ({applications.length || stats?.totalApplications || 0})
               </button>
@@ -384,11 +434,10 @@ const WorkingClientDashboard = () => {
                           <div className="ml-4">
                             <div className="flex items-center">
                               <h4 className="text-lg font-medium text-gray-900">{app.name}</h4>
-                              <span className={`ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                app.authMode === 'advanced' 
-                                  ? 'bg-purple-100 text-purple-800' 
-                                  : 'bg-green-100 text-green-800'
-                              }`}>
+                              <span className={`ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${app.authMode === 'advanced'
+                                ? 'bg-purple-100 text-purple-800'
+                                : 'bg-green-100 text-green-800'
+                                }`}>
                                 {app.authMode}
                               </span>
                             </div>
@@ -408,9 +457,23 @@ const WorkingClientDashboard = () => {
                             <div className="text-2xl font-bold text-indigo-600">{app.userCount}</div>
                             <div className="text-xs text-gray-500">Total Users</div>
                           </div>
-                          <button className="text-indigo-600 hover:text-indigo-900 text-sm font-medium">
-                            Manage →
-                          </button>
+                          <div className="flex flex-col space-y-2">
+                            <button
+                              onClick={() => navigate(`/client/applications/${app.id}`)}
+                              className="text-indigo-600 hover:text-indigo-900 text-sm font-medium"
+                            >
+                              Manage →
+                            </button>
+                            <button
+                              onClick={() => {
+                                setSelectedApp(app);
+                                fetchJwks(app.id);
+                              }}
+                              className="text-gray-600 hover:text-gray-900 text-sm font-medium bg-gray-100 px-2 py-1 rounded"
+                            >
+                              🔑 JWKS
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -418,6 +481,94 @@ const WorkingClientDashboard = () => {
                 )}
               </div>
             </div>
+
+            {/* JWKS Modal */}
+            {selectedApp && (
+              <div className="fixed inset-0 z-10 overflow-y-auto">
+                <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+                  <div className="fixed inset-0 transition-opacity" aria-hidden="true">
+                    <div className="absolute inset-0 bg-gray-500 opacity-75" onClick={() => setSelectedApp(null)}></div>
+                  </div>
+                  <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+                  <div className="inline-block align-middle bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-2xl sm:w-full">
+                    <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+                      <div className="sm:flex sm:items-start">
+                        <div className="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left w-full">
+                          <h3 className="text-lg leading-6 font-medium text-gray-900" id="modal-title">
+                            JWKS for {selectedApp.name}
+                          </h3>
+                          <div className="mt-4">
+                            <p className="text-sm text-gray-500 mb-4">
+                              Use this JSON Web Key Set to verify JWTs signed by this application.
+                            </p>
+                            <div className="bg-gray-900 rounded-md p-4 overflow-x-auto relative">
+                              <pre className="text-green-400 text-xs font-mono">
+                                {jwksLoading ? '// Loading JWKS...' : (
+                                  (!jwks || (Array.isArray(jwks) && jwks.length === 0))
+                                    ? '// No keys found. Click "Generate Keys" below.'
+                                    : JSON.stringify(jwks, null, 2)
+                                )}
+                              </pre>
+                            </div>
+
+                            {(!jwks || (Array.isArray(jwks) && jwks.length === 0)) && !jwksLoading && (
+                              <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-md">
+                                <div className="flex">
+                                  <div className="flex-shrink-0">
+                                    <svg className="h-5 w-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
+                                      <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                                    </svg>
+                                  </div>
+                                  <div className="ml-3">
+                                    <h3 className="text-sm font-medium text-yellow-800">No RSA Keys Active</h3>
+                                    <div className="mt-2 text-sm text-yellow-700">
+                                      <p>This application does not have any active RSA keys. Secure JWT signing will not work until keys are generated.</p>
+                                    </div>
+                                    <div className="mt-4">
+                                      <button
+                                        onClick={() => handleGenerateKeys(selectedApp.id)}
+                                        className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-yellow-900 bg-yellow-100 hover:bg-yellow-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500"
+                                      >
+                                        ✨ Generate RSA Keys Now
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                            <div className="mt-4 flex flex-col space-y-2">
+                              <label className="text-sm font-medium text-gray-700">JWKS Endpoint URL</label>
+                              <div className="flex">
+                                <input
+                                  type="text"
+                                  readOnly
+                                  value={`http://localhost:8000/.well-known/jwks/${selectedApp.id}.json`}
+                                  className="flex-1 bg-gray-50 border border-gray-300 rounded-l-md px-3 py-2 text-sm font-mono"
+                                />
+                                <button
+                                  onClick={() => navigator.clipboard.writeText(`http://localhost:8000/.well-known/jwks/${selectedApp.id}.json`)}
+                                  className="bg-indigo-600 text-white px-4 py-2 rounded-r-md text-sm hover:bg-indigo-700"
+                                >
+                                  Copy
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+                      <button
+                        onClick={() => setSelectedApp(null)}
+                        className="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-indigo-600 text-base font-medium text-white hover:bg-indigo-700 focus:outline-none sm:ml-3 sm:w-auto sm:text-sm"
+                      >
+                        Close
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </>
         )}
 
