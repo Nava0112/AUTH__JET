@@ -350,7 +350,7 @@ class ClientAuthController {
 
       const allowedFields = [
         'name', 'description', 'allowed_origins', 'redirect_url',
-        'main_page_url', 'webhook_url', 'role_request_webhook',
+        'main_page_url', 'webhook_url',
         'default_role', 'roles_config', 'is_active'
       ];
 

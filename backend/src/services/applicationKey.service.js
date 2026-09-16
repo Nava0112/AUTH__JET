@@ -3,18 +3,7 @@ const jwt = require('jsonwebtoken');
 const database = require('../utils/database');
 const logger = require('../utils/logger');
 
-/**
- * ApplicationKeyService
- * 
- * Manages RSA key pairs at the APPLICATION level (not client level).
- * Each application gets its own key pair for signing JWTs.
- * 
- * KEY IMPROVEMENTS:
- * - Fixed encryption key consistency
- * - Application-level keys instead of client-level
- * - Proper key rotation support
- * - Consistent encryption/decryption with AES-256-GCM
- */
+
 class ApplicationKeyService {
     constructor() {
         this.algorithm = 'RS256';

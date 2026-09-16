@@ -245,36 +245,58 @@ class UserAuthController {
   }
 
   /**
-   * Role Upgrade Request
+   * Update user role for an application
    */
-  async requestRoleUpgrade(req, res, next) {
-    const { user_id } = req.params;
-    const { requested_role } = req.body;
+  async updateUserRole(req, res, next) {
+    const { user_id, role } = req.body;
+    const applicationId = req.application?.id;
 
     try {
+      if (!applicationId) {
+        return res.status(401).json({ error: 'Application authentication required', code: 'AUTH_REQUIRED' });
+      }
+
+      if (!user_id || !role) {
+        return res.status(400).json({
+          error: 'user_id and role are required',
+          code: 'MISSING_REQUIRED_FIELDS'
+        });
+      }
+
       const user = await User.findById(user_id);
       if (!user) {
         return res.status(404).json({ error: 'User not found' });
       }
 
-      if (user.role === requested_role) {
-        return res.status(400).json({ error: 'User already has this role' });
+      if (parseInt(user.application_id) !== parseInt(applicationId)) {
+        return res.status(404).json({ error: 'User not found for this application', code: 'USER_NOT_FOUND' });
       }
 
-      await User.update(user_id, {
-        requested_role,
-        role_request_status: 'pending'
+      if (user.role === role) {
+        return res.status(400).json({ error: 'User already has this role', code: 'ROLE_UNCHANGED' });
+      }
+
+      const updatedUser = await User.update(user_id, {
+        role,
+        requested_role: null,
+        role_request_status: 'approved'
       });
 
-      logger.info('Role upgrade requested', { userId: user_id, requested_role });
+      logger.info('User role updated', { userId: user_id, applicationId, role });
 
       res.json({
         success: true,
-        message: 'Role upgrade request submitted successfully'
+        message: 'User role updated successfully',
+        user: {
+          id: updatedUser.id,
+          email: updatedUser.email,
+          role: updatedUser.role,
+          application_id: updatedUser.application_id
+        }
       });
 
     } catch (error) {
-      logger.error('Role upgrade request error:', error);
+      logger.error('User role update error:', error);
       next(error);
     }
   }
