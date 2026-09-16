@@ -19,6 +19,9 @@ const adminRoutes = require('./routes/admin.routes');
 const clientAuthRoutes = require('./routes/clientAuth.routes');
 const userAuthRoutes = require('./routes/userAuth.routes');
 const jwksRoutes = require('./routes/jwks.routes');
+const socialAuthRoutes = require('./routes/socialAuth.routes');
+const dashboardRoutes = require('./routes/dashboard.routes');
+const analyticsRoutes = require('./routes/analytics.routes');
 
 class AuthJetApp {
   constructor() {
@@ -318,37 +321,10 @@ class AuthJetApp {
     // ROUTE MOUNTING
     // ============================================================================
 
-    // 1. PUBLIC JWKS ENDPOINTS (No Auth)
-    // Mounted at root to follow standard convention: /.well-known/jwks.json
-    this.app.get('/.well-known/jwks.json', (req, res) => {
-      try {
-        const jwtService = require('./services/jwt.service');
-        const jwk = jwtService.getPublicJwk();
-
-        if (!jwk) {
-          return res.status(501).json({
-            error: 'JWKS not supported with current configuration',
-            code: 'JWKS_NOT_SUPPORTED'
-          });
-        }
-
-        res.json({ keys: [jwk] });
-      } catch (error) {
-        logger.error('JWKS endpoint error:', error);
-        res.status(500).json({
-          error: 'Failed to retrieve JWKS',
-          code: 'JWKS_ERROR'
-        });
-      }
-    });
-
-    // Application specific JWKS (from Phase 1D)
-    this.app.use('/', require('./routes/jwks.routes'));
-
+    // 1. JWKS ROUTES
+    this.app.use('/', jwksRoutes); 
     // 2. SOCIAL AUTH ROUTES
-    this.app.use('/api/auth/social', require('./routes/socialAuth.routes'));
-
-    // 3. MULTI-TENANT API ROUTES (The New Standard)
+    this.app.use('/api/auth/social', socialAuthRoutes);
 
     // Admin Routes (Platform Administrators)
     this.app.use('/api/admin', adminRoutes);
@@ -360,8 +336,8 @@ class AuthJetApp {
     this.app.use('/api/user', userAuthRoutes); // Includes registration, login, profile
 
     // 4. SHARED/UTILITY ROUTES
-    this.app.use('/api/dashboard', require('./routes/dashboard.routes')); // Shared dashboard data
-    this.app.use('/api/analytics', require('./routes/analytics.routes')); // Analytics
+    this.app.use('/api/dashboard', dashboardRoutes); // Shared dashboard data
+    this.app.use('/api/analytics', analyticsRoutes); // Analytics
 
     // API information endpoint
     this.app.get('/api', (req, res) => {
@@ -375,7 +351,7 @@ class AuthJetApp {
           client: '/api/client',
           user: '/api/user',
           social: '/api/auth/social',
-          jwks: '/.well-known/jwks.json'
+          jwks: 'POST /.well-known/jwks'
         }
       });
     });
@@ -412,7 +388,7 @@ class AuthJetApp {
           logger.info('Available endpoints:');
           logger.info('  Health: http://localhost:' + PORT + '/health');
           logger.info('  API Info: http://localhost:' + PORT + '/api');
-          logger.info('  JWKS: http://localhost:' + PORT + '/.well-known/jwks.json');
+          logger.info('  JWKS secret POST: http://localhost:' + PORT + '/.well-known/jwks');
         }
       });
 

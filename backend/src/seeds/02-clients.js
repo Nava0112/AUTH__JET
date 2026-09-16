@@ -55,7 +55,6 @@ exports.seed = async function(knex) {
       redirect_url: 'https://app.techcorp.com/auth/callback',
       allowed_origins: ['https://app.techcorp.com', 'https://admin.techcorp.com'],
       webhook_url: 'https://app.techcorp.com/webhooks/auth',
-      role_request_webhook: 'https://app.techcorp.com/webhooks/role-requests',
       default_role: 'user',
       is_active: true,
       roles_config: JSON.stringify([

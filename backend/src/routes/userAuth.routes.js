@@ -1,6 +1,5 @@
 const express = require('express');
 const { authenticateApplication } = require('../middleware/applicationAuth');
-const { authenticateUser } = require('../middleware/multiTenantAuth');
 const userAuthController = require('../controllers/userAuth.controller');
 const database = require('../utils/database');
 const logger = require('../utils/logger');
@@ -171,16 +170,13 @@ router.post('/logout',
 );
 
 /**
- * Request Role Upgrade
- * Requires: User JWT token
- * Body: { requested_role }
+ * Update User Role
+ * Requires: Application authentication
+ * Body: { user_id, role }
  */
-router.post('/:user_id/request-role',
-  authenticateUser,
-  userAuthController.requestRoleUpgrade.bind(userAuthController)
+router.post('/role',
+  authenticateApplication,
+  userAuthController.updateUserRole.bind(userAuthController)
 );
-
-// Role request tracking is now handled via the user profile and direct table fields.
-
 
 module.exports = router;
