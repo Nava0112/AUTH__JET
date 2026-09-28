@@ -236,19 +236,6 @@ const apiServiceObj = {
         .catch(handleApiError),
   },
 
-  // Webhook endpoints
-  webhooks: {
-    test: (clientId, webhookData) =>
-      api.post(`/api/admin/clients/${clientId}/webhooks/test`, webhookData)
-        .then(response => response.data)
-        .catch(handleApiError),
-
-    getLogs: (clientId, params = {}) =>
-      api.get(`/api/admin/clients/${clientId}/webhooks/logs`, { params })
-        .then(response => response.data)
-        .catch(handleApiError),
-  },
-
   // Analytics endpoints
   analytics: {
     getDashboardStats: () =>
@@ -256,14 +243,6 @@ const apiServiceObj = {
         .then(response => response.data)
         .catch(handleApiError),
 
-    getClientStats: (clientId, period = '30d') =>
-      api.get(`/api/admin/clients/${clientId}/stats`, { params: { period } }) // Helper if stats route exists?
-        .then(response => response.data)
-        .catch(handleApiError),
-    getLoginTrends: (clientId, period = '30d') =>
-      api.get(`/api/admin/clients/${clientId}/analytics/logins`, { params: { period } })
-        .then(response => response.data)
-        .catch(handleApiError),
   },
 };
 

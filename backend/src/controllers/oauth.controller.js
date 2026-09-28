@@ -1,396 +1,219 @@
-const crypto = require('../utils/crypto');
-const jwt = require('jsonwebtoken');
+const nodeCrypto = require('crypto');
 const database = require('../utils/database');
-const logger = require('../utils/logger');
+const passwordCrypto = require('../utils/crypto');
+const ApplicationKeyService = require('../services/applicationKey.service');
+
+const DEFAULT_SCOPES = ['openid', 'profile', 'email'];
+const REQUEST_TTL = 10 * 60 * 1000;
+
+function randomToken(bytes = 32) {
+  return nodeCrypto.randomBytes(bytes).toString('base64url');
+}
+
+function hash(value) {
+  return nodeCrypto.createHash('sha256').update(value).digest('hex');
+}
+
+function oauthError(res, error, description, status = 400) {
+  return res.status(status).json({ error, error_description: description });
+}
 
 class OAuthController {
-  // OAuth-style login initiation - GET /oauth/authorize
+  async loadClient(clientId) {
+    const result = await database.query(`
+      SELECT id, name, oauth_client_id, oauth_client_secret_hash,
+              oauth_redirect_uris, oauth_allowed_scopes, oauth_client_type, oauth_jwt_claims
+      FROM client_applications
+      WHERE oauth_client_id = $1 AND is_active = true
+    `, [clientId]);
+    return result.rows[0] || null;
+  }
+
+  normalizeClient(client) {
+    return {
+      ...client,
+      redirectUris: Array.isArray(client.oauth_redirect_uris)
+        ? client.oauth_redirect_uris
+        : JSON.parse(client.oauth_redirect_uris || '[]'),
+      allowedScopes: Array.isArray(client.oauth_allowed_scopes)
+        ? client.oauth_allowed_scopes
+        : JSON.parse(client.oauth_allowed_scopes || JSON.stringify(DEFAULT_SCOPES))
+    };
+  }
+
+  validateRequest(query, client) {
+    const requestedScopes = (query.scope || '').split(' ').filter(Boolean);
+    if (query.response_type !== 'code') return 'Only response_type=code is supported';
+    if (!query.redirect_uri || !client.redirectUris.includes(query.redirect_uri)) return 'redirect_uri is not registered';
+    if (!requestedScopes.includes('openid')) return 'The openid scope is required';
+    if (requestedScopes.some(scope => !client.allowedScopes.includes(scope))) return 'One or more scopes are not allowed';
+    if (!query.code_challenge || query.code_challenge_method !== 'S256') return 'S256 PKCE is required';
+    return null;
+  }
+
   async authorize(req, res, next) {
     try {
-      const { client_id, redirect_uri, state, response_type = 'code' } = req.query;
-
-      if (!client_id || !redirect_uri) {
-        return res.status(400).json({
-          error: 'invalid_request',
-          error_description: 'client_id and redirect_uri are required'
-        });
+      const { client_id, redirect_uri, response_type, scope, state, nonce, code_challenge, code_challenge_method } = req.query;
+      if (!client_id || !redirect_uri || !response_type || !scope || !code_challenge || !code_challenge_method) {
+        return oauthError(res, 'invalid_request', 'client_id, redirect_uri, response_type, scope, code_challenge, and code_challenge_method are required');
       }
+      const client = await this.loadClient(client_id);
+      if (!client) return oauthError(res, 'invalid_client', 'Unknown or inactive client');
+      const normalized = this.normalizeClient(client);
+      const validationError = this.validateRequest(req.query, normalized);
+      if (validationError) return oauthError(res, 'invalid_request', validationError);
 
-      // Verify application exists and get details
-      const app = await database.query(
-        'SELECT id, name, redirect_url, main_page_url, client_id FROM client_applications WHERE id = $1 AND is_active = true',
-        [client_id]
-      );
-
-      if (app.rows.length === 0) {
-        return res.status(400).json({
-          error: 'invalid_client',
-          error_description: 'Application not found'
-        });
-      }
-
-      const application = app.rows[0];
-
-      // Verify redirect URI matches
-      if (redirect_uri !== application.redirect_url) {
-        return res.status(400).json({
-          error: 'invalid_request',
-        {
-          sub: user.id,
-          app_id: client_id,
-          type: 'refresh'
-        },
-        process.env.JWT_SECRET,
-        { expiresIn: '7d' }
-      );
-
-      // Store refresh token
-      await database.query(
-        'UPDATE users SET jwt_refresh_token = $1 WHERE id = $2',
-        [refreshToken, user.id]
-      );
-
-      logger.info('OAuth user registration successful', {
-        userId: user.id,
-        email: user.email,
-        applicationId: client_id
-      });
-
-      // Send webhook notification if configured
-      if (application.webhook_url) {
-        try {
-          const fetch = require('node-fetch');
-
-          await fetch(application.webhook_url, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'User-Agent': 'AuthJet-Webhook/1.0'
-            },
-            body: JSON.stringify({
-              event: 'user.registered',
-              data: {
-                user: {
-                  id: user.id,
-                  email: user.email,
-                  name: user.name,
-                  role: user.role
-                },
-                application_id: client_id,
-                timestamp: new Date().toISOString()
-              }
-            })
-          });
-
-          logger.info('Webhook notification sent', {
-            event: 'user.registered',
-            url: application.webhook_url
-          });
-        } catch (webhookError) {
-          logger.error('Webhook notification failed', {
-            event: 'user.registered',
-            url: application.webhook_url,
-            error: webhookError.message
-          });
-        }
-      }
-
-      // Build redirect URL with tokens
-      const redirectUrl = `${redirect_uri || application.redirect_url}?access_token=${accessToken}&refresh_token=${refreshToken}&token_type=Bearer&expires_in=3600&state=${state || ''}`;
-
-      res.status(201).json({
-        success: true,
-        message: 'User registered successfully',
-        redirect_url: redirectUrl,
-        user: {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          role: user.role
-        },
-        tokens: {
-          access_token: accessToken,
-          refresh_token: refreshToken,
-          token_type: 'Bearer',
-          expires_in: 3600
-        }
-      });
-
+      const requestId = randomToken(18);
+      req.session.oauthRequest = {
+        id: requestId,
+        clientId: client_id,
+        clientName: client.name,
+        clientDbId: client.id,
+        redirectUri: redirect_uri,
+        scopes: scope.split(' ').filter(Boolean),
+        state: state || null,
+        nonce: nonce || null,
+        codeChallenge: code_challenge,
+        expiresAt: Date.now() + REQUEST_TTL
+      };
+      const frontend = process.env.FRONTEND_URL || 'http://localhost:3000';
+      const page = req.session.authUserId ? 'consent' : 'login';
+      return res.redirect(`${frontend}/oauth/${page}?request_id=${encodeURIComponent(requestId)}`);
     } catch (error) {
-      logger.error('OAuth registration error:', error);
-      console.error('OAuth registration error details:', error);
-      res.status(500).json({
-        error: 'server_error',
-        error_description: 'Registration failed: ' + error.message
-      });
+      return next(error);
     }
   }
 
-  // User login for OAuth flow - POST /auth/login
+  getRequest(req, res) {
+    const request = req.session.oauthRequest;
+    if (!request || request.id !== req.params.request_id || request.expiresAt < Date.now()) {
+      return oauthError(res, 'invalid_request', 'Authorization request is missing or expired');
+    }
+    return res.json({ client_name: request.clientName, scopes: request.scopes });
+  }
+
   async login(req, res, next) {
     try {
-      const { email, password, client_id, redirect_uri, state } = req.body;
-
-      if (!email || !password || !client_id) {
-        return res.status(400).json({
-          error: 'invalid_request',
-          error_description: 'Email, password, and client_id are required'
-        });
+      const { request_id, email, password } = req.body;
+      const request = req.session.oauthRequest;
+      if (!request || request.id !== request_id || request.expiresAt < Date.now()) {
+        return oauthError(res, 'invalid_request', 'Authorization request is missing or expired');
       }
-
-      // Get application details
-      const app = await database.query(
-        'SELECT id, client_id, name, redirect_url, webhook_url FROM client_applications WHERE id = $1 AND is_active = true',
-        [client_id]
-      );
-
-      if (app.rows.length === 0) {
-        return res.status(400).json({
-          error: 'invalid_client',
-          error_description: 'Application not found'
-        });
-      }
-
-      const application = app.rows[0];
-
-      // Find user
-      const result = await database.query(
-        'SELECT id, email, password_hash, name, role, is_active FROM users WHERE application_id = $1 AND email = $2',
-        [client_id, email.toLowerCase()]
-      );
-
-      if (result.rows.length === 0) {
-        return res.status(400).json({
-          error: 'invalid_grant',
-          error_description: 'Invalid credentials'
-        });
-      }
-
+      const result = await database.query(`
+        SELECT id, password_hash FROM users
+        WHERE lower(email) = lower($1) AND is_active = true
+        ORDER BY created_at ASC LIMIT 1
+      `, [email]);
       const user = result.rows[0];
-
-      if (!user.is_active) {
-        return res.status(400).json({
-          error: 'invalid_grant',
-          error_description: 'Account is deactivated'
-        });
+      if (!user || !(await passwordCrypto.verifyPassword(password, user.password_hash))) {
+        return oauthError(res, 'access_denied', 'Invalid email or password', 401);
       }
-
-      // Check password
-      const validPassword = await crypto.comparePassword(password, user.password_hash);
-
-      if (!validPassword) {
-        return res.status(400).json({
-          error: 'invalid_grant',
-          error_description: 'Invalid credentials'
-        });
-      }
-
-      // Generate JWT tokens
-      const accessToken = jwt.sign(
-        {
-          sub: user.id,
-          email: user.email,
-          name: user.name,
-          role: user.role,
-          app_id: client_id,
-          type: 'access'
-        },
-        process.env.JWT_SECRET,
-        { expiresIn: '1h' }
-      );
-
-      const refreshToken = jwt.sign(
-        {
-          sub: user.id,
-          app_id: client_id,
-          type: 'refresh'
-        },
-        process.env.JWT_SECRET,
-        { expiresIn: '7d' }
-      );
-
-      // Update last login and refresh token
-      await database.query(
-        'UPDATE users SET last_login = NOW(), jwt_refresh_token = $1 WHERE id = $2',
-        [refreshToken, user.id]
-      );
-
-      logger.info('OAuth user login successful', {
-        userId: user.id,
-        email: user.email,
-        applicationId: client_id
-      });
-
-      // Send webhook notification
-      if (application.webhook_url) {
-        try {
-          const fetch = require('node-fetch');
-
-          await fetch(application.webhook_url, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'User-Agent': 'AuthJet-Webhook/1.0'
-            },
-            body: JSON.stringify({
-              event: 'user.login',
-              data: {
-                user: {
-                  id: user.id,
-                  email: user.email,
-                  name: user.name,
-                  role: user.role
-                },
-                application_id: client_id,
-                timestamp: new Date().toISOString()
-              }
-            })
-          });
-
-          logger.info('Webhook notification sent', {
-            event: 'user.login',
-            url: application.webhook_url
-          });
-        } catch (webhookError) {
-          logger.error('Webhook notification failed', {
-            event: 'user.login',
-            url: application.webhook_url,
-            error: webhookError.message
-          });
-        }
-      }
-
-      // Build redirect URL with tokens
-      const redirectUrl = `${redirect_uri || application.redirect_url}?access_token=${accessToken}&refresh_token=${refreshToken}&token_type=Bearer&expires_in=3600&state=${state || ''}`;
-
-      res.json({
-        success: true,
-        message: 'Login successful',
-        redirect_url: redirectUrl,
-        user: {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          role: user.role
-        },
-        tokens: {
-          access_token: accessToken,
-          refresh_token: refreshToken,
-          token_type: 'Bearer',
-          expires_in: 3600
-        }
-      });
-
+      req.session.authUserId = user.id;
+      return res.json({ success: true });
     } catch (error) {
-      logger.error('OAuth login error:', error);
-      res.status(500).json({
-        error: 'server_error',
-        error_description: 'Login failed'
-      });
+      return next(error);
     }
   }
 
-  // Get user profile with JWT - GET /auth/profile
-  async getProfile(req, res, next) {
+  async consent(req, res) {
+    return this.getRequest(req, res);
+  }
+
+  async decideConsent(req, res, next) {
     try {
-      const authHeader = req.headers.authorization;
-
-      if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return res.status(401).json({
-          error: 'invalid_token',
-          error_description: 'Access token required'
-        });
+      const request = req.session.oauthRequest;
+      if (!request || request.id !== req.body.request_id || request.expiresAt < Date.now() || !req.session.authUserId) {
+        return oauthError(res, 'invalid_request', 'Authorization request is missing, expired, or unauthenticated');
       }
-
-      const token = authHeader.substring(7);
-
-      try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-        if (decoded.type !== 'access') {
-          throw new Error('Invalid token type');
-        }
-
-        const userId = decoded.sub;
-        const applicationId = decoded.app_id;
-
-        const result = await database.query(
-          'SELECT id, email, name, role, requested_role, role_request_status, is_active, email_verified, last_login, created_at FROM users WHERE id = $1 AND application_id = $2',
-          [userId, applicationId]
-        );
-
-        if (result.rows.length === 0) {
-          return res.status(404).json({
-            error: 'invalid_request',
-            error_description: 'User not found'
-          });
-        }
-
-        const user = result.rows[0];
-
-        res.json({
-          success: true,
-          user: {
-            id: user.id,
-            email: user.email,
-            name: user.name,
-            role: user.role,
-            requested_role: user.requested_role,
-            role_request_status: user.role_request_status,
-            is_active: user.is_active,
-            email_verified: user.email_verified,
-            last_login: user.last_login,
-            created_at: user.created_at
-          }
-        });
-
-      } catch (jwtError) {
-        return res.status(401).json({
-          error: 'invalid_token',
-          error_description: 'Invalid or expired token'
-        });
+      const callback = new URL(request.redirectUri);
+      if (req.body.decision !== 'allow') {
+        callback.searchParams.set('error', 'access_denied');
+        callback.searchParams.set('error_description', 'The user denied access');
+      } else {
+        const rawCode = randomToken(32);
+        await database.query(`
+          INSERT INTO oauth_authorization_codes
+            (code_hash, user_id, application_id, redirect_uri, scopes, nonce, code_challenge, expires_at)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, NOW() + interval '60 seconds')
+        `, [hash(rawCode), req.session.authUserId, request.clientDbId, request.redirectUri,
+          JSON.stringify(request.scopes), request.nonce, request.codeChallenge]);
+        callback.searchParams.set('code', rawCode);
       }
-
+      if (request.state) callback.searchParams.set('state', request.state);
+      delete req.session.oauthRequest;
+      return res.json({ redirect_uri: callback.toString() });
     } catch (error) {
-      logger.error('Get profile error:', error);
-      res.status(500).json({
-        error: 'server_error',
-        error_description: 'Failed to get profile'
-      });
+      return next(error);
     }
   }
 
-  // Helper method to send webhook notifications
-  async sendWebhookNotification(webhookUrl, event, data) {
+  async token(req, res, next) {
     try {
-      const fetch = require('node-fetch');
+      const { grant_type, code, redirect_uri, client_id, client_secret, code_verifier, refresh_token } = req.body;
+      const client = await this.loadClient(client_id);
+      if (!client) return oauthError(res, 'invalid_client', 'Unknown or inactive client', 401);
+      const normalized = this.normalizeClient(client);
+      if (normalized.oauth_client_type !== 'public') {
+        const suppliedHash = client_secret ? hash(client_secret) : '';
+        const legacyHash = client_secret ? nodeCrypto.createHash('md5').update(client_secret).digest('hex') : '';
+        const valid = client.oauth_client_secret_hash &&
+          (suppliedHash === client.oauth_client_secret_hash || legacyHash === client.oauth_client_secret_hash);
+        if (!valid) return oauthError(res, 'invalid_client', 'Client authentication failed', 401);
+      }
+      if (grant_type === 'refresh_token') return this.refresh(res, client, refresh_token);
+      if (grant_type !== 'authorization_code' || !code || !redirect_uri || !code_verifier) {
+        return oauthError(res, 'invalid_request', 'authorization_code requires code, redirect_uri, and code_verifier');
+      }
 
-      await fetch(webhookUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': 'AuthJet-Webhook/1.0'
-        },
-        body: JSON.stringify({
-          event: event,
-          data: data
-        })
-      });
-
-      logger.info('Webhook notification sent', {
-        event: event,
-        url: webhookUrl
-      });
-
+      const result = await database.query(`
+        UPDATE oauth_authorization_codes SET used_at = NOW()
+        WHERE code_hash = $1 AND application_id = $2 AND redirect_uri = $3
+          AND used_at IS NULL AND expires_at > NOW()
+        RETURNING user_id, scopes, nonce, code_challenge
+      `, [hash(code), client.id, redirect_uri]);
+      const authorizationCode = result.rows[0];
+      if (!authorizationCode) return oauthError(res, 'invalid_grant', 'Authorization code is invalid, expired, or already used');
+      const expectedChallenge = nodeCrypto.createHash('sha256').update(code_verifier).digest('base64url');
+      if (expectedChallenge !== authorizationCode.code_challenge) return oauthError(res, 'invalid_grant', 'PKCE verification failed');
+      return this.issueTokens(res, client, authorizationCode.user_id, authorizationCode.scopes, authorizationCode.nonce);
     } catch (error) {
-      logger.error('Webhook notification failed', {
-        event: event,
-        url: webhookUrl,
-        error: error.message
-      });
+      return next(error);
     }
   }
 
+  async issueTokens(res, client, userId, scopesValue, nonce) {
+    const scopes = Array.isArray(scopesValue) ? scopesValue : JSON.parse(scopesValue);
+    const userResult = await database.query('SELECT id, email, name, email_verified, role FROM users WHERE id = $1 AND is_active = true', [userId]);
+    const user = userResult.rows[0];
+    if (!user) return oauthError(res, 'invalid_grant', 'User is no longer active');
+    const audience = client.oauth_client_id;
+    const jwtClaims = client.oauth_jwt_claims && typeof client.oauth_jwt_claims === 'object'
+      ? client.oauth_jwt_claims
+      : JSON.parse(client.oauth_jwt_claims || '{}');
+    const accessToken = await ApplicationKeyService.signJwt(client.id, { sub: String(user.id), aud: audience, scope: scopes.join(' '), token_use: 'access' });
+    const idToken = await ApplicationKeyService.signJwt(client.id, {
+      sub: String(user.id), aud: audience,
+      ...jwtClaims,
+      nonce, token_use: 'id'
+    });
+    const rawRefresh = randomToken(40);
+    await database.query(`
+      INSERT INTO oauth_refresh_tokens (token_hash, user_id, application_id, scopes, expires_at)
+      VALUES ($1, $2, $3, $4, NOW() + interval '30 days')
+    `, [hash(rawRefresh), user.id, client.id, JSON.stringify(scopes)]);
+    return res.json({ access_token: accessToken, id_token: idToken, refresh_token: rawRefresh, token_type: 'Bearer', expires_in: 900, scope: scopes.join(' ') });
+  }
+
+  async refresh(res, client, rawRefresh) {
+    if (!rawRefresh) return oauthError(res, 'invalid_request', 'refresh_token is required');
+    const result = await database.query(`
+      UPDATE oauth_refresh_tokens SET revoked_at = NOW()
+      WHERE token_hash = $1 AND application_id = $2 AND revoked_at IS NULL AND expires_at > NOW()
+      RETURNING user_id, scopes
+    `, [hash(rawRefresh), client.id]);
+    if (!result.rows[0]) return oauthError(res, 'invalid_grant', 'Refresh token is invalid or expired');
+    return this.issueTokens(res, client, result.rows[0].user_id, result.rows[0].scopes, null);
+  }
 }
 
 module.exports = new OAuthController();

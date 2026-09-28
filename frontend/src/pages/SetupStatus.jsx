@@ -13,7 +13,7 @@ const SetupStatus = () => {
       const response = await fetch('http://localhost:8000/health');
       if (response.ok) {
         setBackendStatus('running');
-        const data = await response.json();
+        await response.json();
         setDatabaseStatus('connected');
       } else {
         setBackendStatus('error');
