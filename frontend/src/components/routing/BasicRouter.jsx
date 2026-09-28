@@ -15,7 +15,8 @@ import UserRegister from '../../pages/user/UserRegister';
 import VerifyEmail from '../../pages/user/VerifyEmail';
 import UserProfile from '../../pages/user/UserProfile';
 import RoleManagement from '../../pages/user/RoleManagement';
-import ForgotPassword from '../../pages/ForgotPassword';
+import OAuthLogin from '../../pages/OAuthLogin';
+import OAuthConsent from '../../pages/OAuthConsent';
 
 // Simple fallback components
 const ComingSoon = ({ title = "Coming Soon" }) => (
@@ -74,13 +75,11 @@ const BasicRouter = () => {
       <Route path="/client/register" element={<WorkingClientRegister />} />
       <Route path="/client/dashboard" element={<WorkingClientDashboard />} />
       <Route path="/client/create-application" element={<CreateApplication />} />
-      <Route path="/client/forgot-password" element={<ForgotPassword />} />
 
       {/* Admin Routes (AuthJet Platform Admins) */}
       <Route path="/admin/login" element={<WorkingAdminLogin />} />
       <Route path="/admin/register" element={<WorkingAdminRegister />} />
       <Route path="/admin/dashboard" element={<WorkingAdminDashboard />} />
-      <Route path="/admin/forgot-password" element={<ForgotPassword />} />
 
       {/* 👇 NEW: User Routes (End-users of your clients' apps) */}
       <Route path="/user/login" element={<UserLogin />} />
@@ -88,6 +87,10 @@ const BasicRouter = () => {
       <Route path="/user/verify-email" element={<VerifyEmail />} />
       <Route path="/user/profile" element={<UserProfile />} />
       <Route path="/user/roles" element={<RoleManagement />} />
+
+      {/* AuthJet authorization server pages */}
+      <Route path="/oauth/login" element={<OAuthLogin />} />
+      <Route path="/oauth/consent" element={<OAuthConsent />} />
 
       {/* Setup and Status Pages */}
       <Route path="/setup" element={<SetupStatus />} />

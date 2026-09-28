@@ -204,7 +204,7 @@ class ApplicationKeyService {
             // Add standard claims
             const fullPayload = {
                 ...payload,
-                iss: `authjet-app-${applicationId}`,
+                iss: payload.iss || `authjet-app-${applicationId}`,
                 iat: Math.floor(Date.now() / 1000)
             };
 

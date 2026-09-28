@@ -237,19 +237,33 @@ class ClientAuthController {
   async createApplication(req, res, next) {
     const {
       name, description, auth_mode = 'jwt',
-      allowed_origins = [], redirect_url,
-      roles_config, default_role
+      allowed_origins = [], redirect_url, redirect_uris,
+      roles_config, default_role, oauth_jwt_claims = []
     } = req.body;
 
     try {
       const application_secret = crypto.generateRandomToken(32);
+      const oauth_client_id = `authjet_${crypto.generateRandomToken(16)}`;
+      const oauth_redirect_uris = Array.isArray(redirect_uris) && redirect_uris.length > 0
+        ? redirect_uris
+        : [redirect_url];
+      const reservedJwtClaims = new Set(['iss', 'sub', 'aud', 'exp', 'iat', 'nbf', 'jti', 'nonce', 'token_use']);
+      const jwtClaims = (Array.isArray(oauth_jwt_claims) ? oauth_jwt_claims : [])
+        .filter(claim => claim && typeof claim.key === 'string' && /^[A-Za-z][A-Za-z0-9_]*$/.test(claim.key.trim()))
+        .filter(claim => !reservedJwtClaims.has(claim.key.trim()))
+        .reduce((claims, claim) => {
+          claims[claim.key.trim()] = typeof claim.value === 'string' ? claim.value : String(claim.value ?? '');
+          return claims;
+        }, {});
 
       const insertQuery = `
         INSERT INTO client_applications (
           client_id, name, description, application_secret, auth_mode,
-          allowed_origins, redirect_url, roles_config, default_role, is_active
+          allowed_origins, redirect_url, roles_config, default_role, is_active,
+          oauth_client_id, oauth_client_secret_hash, oauth_redirect_uris,
+          oauth_allowed_scopes, oauth_client_type, oauth_jwt_claims
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
         RETURNING *
       `;
 
@@ -258,8 +272,9 @@ class ClientAuthController {
         Array.isArray(allowed_origins) ? JSON.stringify(allowed_origins) : allowed_origins,
         redirect_url,
         roles_config ? (typeof roles_config === 'string' ? roles_config : JSON.stringify(roles_config)) : null,
-        default_role || 'user',
-        true
+        default_role || 'user', true,
+        oauth_client_id, crypto.hashToken(application_secret), JSON.stringify(oauth_redirect_uris),
+        JSON.stringify(['openid', 'profile', 'email']), 'confidential', JSON.stringify(jwtClaims)
       ]);
 
       const application = result.rows[0];
@@ -283,7 +298,10 @@ class ClientAuthController {
         message: 'Application created successfully',
         application: {
           ...application,
-          application_secret // Return raw secret once
+          application_secret,
+          client_id: oauth_client_id,
+          client_secret: application_secret,
+          redirect_uris: oauth_redirect_uris
         }
       });
 
@@ -655,190 +673,6 @@ class ClientAuthController {
     }
   }
 
-  async forgotPassword(req, res, next) {
-    try {
-      res.json({ message: 'Forgot password endpoint - to be implemented' });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  async resetPassword(req, res, next) {
-    try {
-      res.json({ message: 'Reset password endpoint - to be implemented' });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  async verifyEmail(req, res, next) {
-    try {
-      res.json({ message: 'Verify email endpoint - to be implemented' });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  async updateProfile(req, res, next) {
-    try {
-      res.json({ message: 'Update profile endpoint - to be implemented' });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  async changePassword(req, res, next) {
-    try {
-      res.json({ message: 'Change password endpoint - to be implemented' });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  // Additional methods for user management, analytics, etc. would go here
-  async getApplicationUsers(req, res, next) {
-    try {
-      res.json({ message: 'Get application users endpoint - to be implemented' });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  async getApplicationUser(req, res, next) {
-    try {
-      res.json({ message: 'Get application user endpoint - to be implemented' });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  async updateApplicationUser(req, res, next) {
-    try {
-      res.json({ message: 'Update application user endpoint - to be implemented' });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  async deleteApplicationUser(req, res, next) {
-    try {
-      res.json({ message: 'Delete application user endpoint - to be implemented' });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  async getApplicationRoles(req, res, next) {
-    try {
-      res.json({ message: 'Get application roles endpoint - to be implemented' });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  async createApplicationRole(req, res, next) {
-    try {
-      res.json({ message: 'Create application role endpoint - to be implemented' });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  async updateApplicationRole(req, res, next) {
-    try {
-      res.json({ message: 'Update application role endpoint - to be implemented' });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  async deleteApplicationRole(req, res, next) {
-    try {
-      res.json({ message: 'Delete application role endpoint - to be implemented' });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  async getApplicationSessions(req, res, next) {
-    try {
-      res.json({ message: 'Get application sessions endpoint - to be implemented' });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  async revokeApplicationSession(req, res, next) {
-    try {
-      res.json({ message: 'Revoke application session endpoint - to be implemented' });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  async getApplicationAnalytics(req, res, next) {
-    try {
-      res.json({ message: 'Application analytics endpoint - to be implemented' });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  async getLoginAnalytics(req, res, next) {
-    try {
-      res.json({ message: 'Login analytics endpoint - to be implemented' });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  async getUserAnalytics(req, res, next) {
-    try {
-      res.json({ message: 'User analytics endpoint - to be implemented' });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  async getWebhookLogs(req, res, next) {
-    try {
-      res.json({ message: 'Webhook logs endpoint - to be implemented' });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  async testWebhook(req, res, next) {
-    try {
-      res.json({ message: 'Test webhook endpoint - to be implemented' });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  async getCurrentBilling(req, res, next) {
-    try {
-      res.json({ message: 'Current billing endpoint - to be implemented' });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  async getBillingHistory(req, res, next) {
-    try {
-      res.json({ message: 'Billing history endpoint - to be implemented' });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  async upgradePlan(req, res, next) {
-    try {
-      res.json({ message: 'Upgrade plan endpoint - to be implemented' });
-    } catch (error) {
-      next(error);
-    }
-  }
 }
 
 module.exports = new ClientAuthController();

@@ -265,30 +265,22 @@ exports.up = async (pgm) => {
 
   // Insert default client if it doesn't exist
   const defaultClientExists = await pgm.db.query(`
-    SELECT EXISTS (
-      SELECT 1 FROM clients WHERE id = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'
-    )
+    SELECT EXISTS (SELECT 1 FROM clients)
   `);
   
   if (!defaultClientExists.rows[0].exists) {
     await pgm.sql(`
       INSERT INTO clients (
-        id, name, contact_email, website, business_type, api_key, secret_key_hash, allowed_domains, 
-        allowed_redirect_uris, default_roles, plan_type, created_at, updated_at
+        name, email, password_hash, organization_name, client_id, client_secret,
+        plan_type, is_active, created_at, updated_at
       ) VALUES (
-        'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
         'AuthJet Development Client',
         'dev@authjet.local',
-        'http://localhost:3000',
-        'development',
+        crypt('development-password', gen_salt('bf')),
+        'AuthJet Development',
         'cli_dev_' || substr(md5(random()::text), 1, 24),
-        substr(md5(random()::text), 1, 32),
-        '["localhost", "127.0.0.1"]',
-        '["http://localhost:3000/oauth/callback"]',
-        '["user"]',
-        'free',
-        NOW(),
-        NOW()
+        'dev_' || substr(md5(random()::text), 1, 32),
+        'basic', true, NOW(), NOW()
       )
     `);
     console.log('Inserted default client');

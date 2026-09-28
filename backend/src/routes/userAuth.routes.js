@@ -3,6 +3,7 @@ const { authenticateApplication } = require('../middleware/applicationAuth');
 const userAuthController = require('../controllers/userAuth.controller');
 const database = require('../utils/database');
 const logger = require('../utils/logger');
+const { authenticateUser } = require('../middleware/userAuth');
 
 const router = express.Router();
 

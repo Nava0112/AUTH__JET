@@ -22,6 +22,7 @@ const jwksRoutes = require('./routes/jwks.routes');
 const socialAuthRoutes = require('./routes/socialAuth.routes');
 const dashboardRoutes = require('./routes/dashboard.routes');
 const analyticsRoutes = require('./routes/analytics.routes');
+const oauthRoutes = require('./routes/oauth.routes');
 
 class AuthJetApp {
   constructor() {
@@ -323,6 +324,7 @@ class AuthJetApp {
 
     // 1. JWKS ROUTES
     this.app.use('/', jwksRoutes); 
+    this.app.use('/oauth', oauthRoutes);
     // 2. SOCIAL AUTH ROUTES
     this.app.use('/api/auth/social', socialAuthRoutes);
 

@@ -1,28 +1,17 @@
 const express = require('express');
-const { authenticateClient, requireRole } = require('../middleware/multiTenantAuth');
-const { createUserRateLimit } = require('../middleware/rateLimit');
+const { authenticateClient } = require('../middleware/multiTenantAuth');
 const clientAuthController = require('../controllers/clientAuth.controller');
 
 const router = express.Router();
-
-// Apply rate limiting to all client routes (temporarily disabled)
-// router.use(createUserRateLimit(100, 15)); // 100 requests per 15 minutes
 
 // Client authentication routes (no auth required)
 router.post('/register', clientAuthController.register);
 router.post('/login', clientAuthController.login);
 router.post('/refresh-token', clientAuthController.refreshToken);
-router.post('/forgot-password', clientAuthController.forgotPassword);
-router.post('/reset-password', clientAuthController.resetPassword);
-router.post('/verify-email', clientAuthController.verifyEmail);
-
-// Protected client routes (temporarily disabled)
-// router.use(authenticateClient);
 
 // Client profile management
 router.use(authenticateClient);
 router.get('/profile', clientAuthController.getProfile);
-router.post('/change-password', clientAuthController.changePassword);
 router.post('/logout', clientAuthController.logout);
 
 // Client dashboard
@@ -41,34 +30,5 @@ router.get('/applications/:id/keys', clientAuthController.getApplicationKeys);
 router.post('/applications/:id/keys/rotate', clientAuthController.rotateApplicationKeys);
 router.get('/applications/:id/jwks', clientAuthController.getApplicationJwks);
 
-// User management for client applications
-router.get('/applications/:appId/users', clientAuthController.getApplicationUsers);
-router.get('/applications/:appId/users/:userId', clientAuthController.getApplicationUser);
-router.put('/applications/:appId/users/:userId', clientAuthController.updateApplicationUser);
-router.delete('/applications/:appId/users/:userId', clientAuthController.deleteApplicationUser);
-
-// Role management (for advanced auth applications)
-router.get('/applications/:appId/roles', clientAuthController.getApplicationRoles);
-router.post('/applications/:appId/roles', clientAuthController.createApplicationRole);
-router.put('/applications/:appId/roles/:roleId', clientAuthController.updateApplicationRole);
-router.delete('/applications/:appId/roles/:roleId', clientAuthController.deleteApplicationRole);
-
-// Session management
-router.get('/applications/:appId/sessions', clientAuthController.getApplicationSessions);
-router.delete('/applications/:appId/sessions/:sessionId', clientAuthController.revokeApplicationSession);
-
-// Analytics for client applications
-router.get('/applications/:appId/analytics', clientAuthController.getApplicationAnalytics);
-router.get('/applications/:appId/analytics/logins', clientAuthController.getLoginAnalytics);
-router.get('/applications/:appId/analytics/users', clientAuthController.getUserAnalytics);
-
-// Webhook management
-router.get('/webhooks/logs', clientAuthController.getWebhookLogs);
-router.post('/webhooks/test', clientAuthController.testWebhook);
-
-// Billing and subscription
-router.get('/billing/current', clientAuthController.getCurrentBilling);
-router.get('/billing/history', clientAuthController.getBillingHistory);
-router.post('/billing/upgrade', clientAuthController.upgradePlan);
 
 module.exports = router;
