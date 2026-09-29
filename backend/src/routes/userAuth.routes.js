@@ -27,7 +27,7 @@ const router = express.Router();
 /**
  * User Registration
  * Headers: X-Application-ID, X-Application-Secret
- * Body: { email, password, name, requested_role? }
+ * Body: { email, password, name }
  */
 router.post('/register',
   authenticateApplication,
@@ -83,15 +83,13 @@ router.get('/applications/:application_id', async (req, res) => {
         ca.id,
         ca.name,
         ca.description,
-        ca.auth_mode,
-        ca.main_page_url,
         ca.redirect_url,
-        ca.default_role,
-        ca.roles_config,
+        ca.oauth_application_id,
+        ca.oauth_allowed_scopes,
         ca.is_active
       FROM client_applications ca
       JOIN clients c ON ca.client_id = c.id
-      WHERE ca.id = $1 AND ca.is_active = true AND c.is_active = true
+      WHERE ca.oauth_application_id = $1 AND ca.is_active = true AND c.is_active = true
     `;
 
     const result = await database.query(query, [application_id]);
@@ -105,25 +103,12 @@ router.get('/applications/:application_id', async (req, res) => {
 
     const app = result.rows[0];
 
-    // Extract roles from JSONB
-    let roles = ['user'];
-    let defaultRole = 'user';
-
-    if (app.roles_config && Array.isArray(app.roles_config)) {
-      roles = app.roles_config.map(r => r.name);
-      const defaultRoleObj = app.roles_config.find(r => r.isDefault);
-      if (defaultRoleObj) defaultRole = defaultRoleObj.name;
-    }
-
     res.json({
       application: {
         id: app.id,
+        application_id: app.oauth_application_id,
         name: app.name,
         description: app.description,
-        auth_mode: app.auth_mode,
-        available_roles: roles,
-        default_role: defaultRole,
-        main_page_url: app.main_page_url,
         redirect_url: app.redirect_url
       }
     });
@@ -168,16 +153,6 @@ router.put('/profile',
 router.post('/logout',
   authenticateUser,
   userAuthController.logout.bind(userAuthController)
-);
-
-/**
- * Update User Role
- * Requires: Application authentication
- * Body: { user_id, role }
- */
-router.post('/role',
-  authenticateApplication,
-  userAuthController.updateUserRole.bind(userAuthController)
 );
 
 module.exports = router;

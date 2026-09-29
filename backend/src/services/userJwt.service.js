@@ -154,7 +154,6 @@ class UserJwtService {
         applicationId,
         {
           email: user.email,
-          role: user.role,
           email_verified: user.email_verified
         }
       );

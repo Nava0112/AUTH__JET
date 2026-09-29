@@ -82,66 +82,46 @@ INSERT INTO clients (id, name, email, password_hash, organization_name, plan_typ
 );
 
 -- Insert Client Applications
-INSERT INTO client_applications (id, client_id, name, description, client_secret, auth_mode, main_page_url, redirect_url, allowed_origins, webhook_url, role_request_webhook, default_role, roles_config) VALUES
+INSERT INTO client_applications (id, client_id, name, description, redirect_url, is_active, oauth_application_id, oauth_application_secret, oauth_allowed_scopes, oauth_jwt_claims) VALUES
 (
     1,
     1,
     'Tech Corp Web App',
     'Main web application for Tech Corp',
-    'app_secret_tech_001',
-    'jwt',
-    'https://app.techcorp.com',
     'https://app.techcorp.com/auth/callback',
-    ARRAY['https://app.techcorp.com', 'https://admin.techcorp.com'],
-    'https://app.techcorp.com/webhooks/auth',
-    'https://app.techcorp.com/webhooks/role-requests',
-    'user',
-    '[
-        {"role": "user", "permissions": ["read"]},
-        {"role": "editor", "permissions": ["read", "write"]},
-        {"role": "admin", "permissions": ["read", "write", "delete", "manage_users"]}
-    ]'::jsonb
+    true,
+    'authjet_tech_web_001',
+    'app_secret_tech_001',
+    '["openid", "profile", "email"]'::jsonb,
+    '{}'::jsonb
 ),
 (
     2,
     1,
     'Tech Corp Mobile App',
     'Mobile application for Tech Corp',
-    'app_secret_tech_002',
-    'jwt',
-    'https://mobile.techcorp.com',
     'https://mobile.techcorp.com/auth/callback',
-    ARRAY['https://mobile.techcorp.com'],
-    NULL,
-    NULL,
-    'user',
-    '[
-        {"role": "user", "permissions": ["read"]},
-        {"role": "premium", "permissions": ["read", "write"]}
-    ]'::jsonb
+    true,
+    'authjet_tech_mobile_002',
+    'app_secret_tech_002',
+    '["openid", "profile", "email"]'::jsonb,
+    '{}'::jsonb
 ),
 (
     3,
     2,
     'Startup XYZ Platform',
     'Main platform for Startup XYZ',
-    'app_secret_startup_003',
-    'basic',
-    'https://platform.startupxyz.com',
     'https://platform.startupxyz.com/callback',
-    ARRAY['https://platform.startupxyz.com'],
-    NULL,
-    NULL,
-    'member',
-    '[
-        {"role": "member", "permissions": ["read"]},
-        {"role": "contributor", "permissions": ["read", "write"]},
-        {"role": "moderator", "permissions": ["read", "write", "moderate"]}
-    ]'::jsonb
+    true,
+    'authjet_startup_platform_003',
+    'app_secret_startup_003',
+    '["openid", "profile", "email"]'::jsonb,
+    '{}'::jsonb
 );
 
 -- Insert Users
-INSERT INTO users (id, client_id, application_id, email, password_hash, name, role, requested_role, role_request_status, metadata, is_active, email_verified) VALUES
+INSERT INTO users (id, client_id, application_id, email, password_hash, name, metadata, is_active, email_verified) VALUES
 (
     1,
     1,
@@ -149,13 +129,7 @@ INSERT INTO users (id, client_id, application_id, email, password_hash, name, ro
     'john.doe@techcorp.com',
     '$2a$12$AQv3c1yqBWVHxkd0g8fK0u7t7JvQW7t7G8bVc6Yf5hT0cA1bC2dE3', -- hashed "user123"
     'John Doe',
-    'admin',
-    NULL,
-    'none',
     '{"department": "Engineering", "position": "Lead Developer", "phone": "+1234567890"}'::jsonb,
-    true,
-    true
-),
 (
     2,
     1,
@@ -163,9 +137,6 @@ INSERT INTO users (id, client_id, application_id, email, password_hash, name, ro
     'jane.smith@techcorp.com',
     '$2a$12$BQv3c1yqBWVHxkd0g8fK0u7t7JvQW7t7G8bVc6Yf5hT0cA1bC2dE3', -- hashed "user456"
     'Jane Smith',
-    'editor',
-    NULL,
-    'none',
     '{"department": "Marketing", "position": "Content Manager", "phone": "+1234567891"}'::jsonb,
     true,
     true
@@ -177,9 +148,6 @@ INSERT INTO users (id, client_id, application_id, email, password_hash, name, ro
     'bob.wilson@techcorp.com',
     '$2a$12$CQv3c1yqBWVHxkd0g8fK0u7t7JvQW7t7G8bVc6Yf5hT0cA1bC2dE3', -- hashed "user789"
     'Bob Wilson',
-    'user',
-    'editor',
-    'pending',
     '{"department": "Sales", "position": "Sales Representative", "phone": "+1234567892"}'::jsonb,
     true,
     true
@@ -191,9 +159,6 @@ INSERT INTO users (id, client_id, application_id, email, password_hash, name, ro
     'alice.brown@techcorp.com',
     '$2a$12$DQv3c1yqBWVHxkd0g8fK0u7t7JvQW7t7G8bVc6Yf5hT0cA1bC2dE3', -- hashed "user012"
     'Alice Brown',
-    'premium',
-    NULL,
-    'none',
     '{"department": "Product", "position": "Product Manager", "phone": "+1234567893"}'::jsonb,
     true,
     true
@@ -205,9 +170,6 @@ INSERT INTO users (id, client_id, application_id, email, password_hash, name, ro
     'charlie.davis@startupxyz.com',
     '$2a$12$EQv3c1yqBWVHxkd0g8fK0u7t7JvQW7t7G8bVc6Yf5hT0cA1bC2dE3', -- hashed "user345"
     'Charlie Davis',
-    'moderator',
-    NULL,
-    'none',
     '{"department": "Community", "position": "Community Manager", "phone": "+1234567894"}'::jsonb,
     true,
     true

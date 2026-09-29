@@ -336,7 +336,7 @@ const CreateApplication = () => {
             <div className="flex items-center space-x-2">
               <span className="font-medium">OAuth URL:</span>
               <code className="px-2 py-1 bg-gray-100 rounded text-xs">
-                /oauth/authorize?client_id=YOUR_ID&redirect_uri={formData.redirectUri || 'YOUR_CALLBACK_URL'}&response_type=code
+                /oauth/authorize?client_id=YOUR_ID&redirect_uri={formData.redirectUri || 'YOUR_CALLBACK_URL'}&response_type=code&scope=openid%20profile%20email&code_challenge=PKCE_CHALLENGE&code_challenge_method=S256
               </code>
             </div>
             <div className="flex items-center space-x-2">

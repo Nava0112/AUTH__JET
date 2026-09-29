@@ -47,8 +47,13 @@ const WorkingAdminLogin = () => {
       if (response.ok && data.success) {
         setSuccess(`Welcome back, ${data.admin.name}!`);
         
-        // Store admin info (you can use localStorage or context)
-        localStorage.setItem('admin', JSON.stringify(data.admin));
+        localStorage.setItem('authjet_admin_token', data.access_token);
+        localStorage.setItem('authjet_admin_refresh_token', data.refresh_token);
+        localStorage.setItem('admin', JSON.stringify({
+          ...data.admin,
+          token: data.access_token,
+          loginMethod: 'email'
+        }));
         
         // Redirect to admin dashboard after a short delay
         setTimeout(() => {

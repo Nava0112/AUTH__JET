@@ -9,38 +9,6 @@ const emailService = require('../services/email.service');
 class UserAuthController {
 
   /**
-   * Helper method to extract roles from roles_config JSONB
-   */
-  extractRolesFromConfig(rolesConfig) {
-    let available_roles = ['user'];
-    let default_user_role = 'user';
-
-    if (rolesConfig) {
-      try {
-        const roles = typeof rolesConfig === 'string'
-          ? JSON.parse(rolesConfig)
-          : rolesConfig;
-
-        if (Array.isArray(roles) && roles.length > 0) {
-          available_roles = roles.map(role => role.name).filter(Boolean);
-          const defaultRoleByFlag = roles.find(role => role.isDefault === true);
-
-          if (defaultRoleByFlag) {
-            default_user_role = defaultRoleByFlag.name;
-          } else {
-            const sortedByHierarchy = [...roles].sort((a, b) => (a.hierarchy || 0) - (b.hierarchy || 0));
-            default_user_role = sortedByHierarchy[0].name;
-          }
-        }
-      } catch (error) {
-        logger.warn('Failed to parse roles_config:', error);
-      }
-    }
-
-    return { available_roles, default_user_role };
-  }
-
-  /**
    * User Registration
    */
   async register(req, res, next) {
@@ -59,7 +27,8 @@ class UserAuthController {
         SELECT ca.*, c.id as client_db_id
         FROM client_applications ca
         JOIN clients c ON ca.client_id = c.id
-        WHERE ca.id = $1 AND c.client_id = $2 AND ca.is_active = true AND c.is_active = true
+        WHERE ca.oauth_application_id = $1 AND c.client_id = $2
+          AND ca.is_active = true AND c.is_active = true
       `;
       const appResult = await database.query(appQuery, [application_id, client_id]);
 
@@ -72,9 +41,10 @@ class UserAuthController {
 
       const application = appResult.rows[0];
       const clientDbId = application.client_db_id;
+      const applicationDbId = application.id;
 
       // Check for existing user
-      const existingUser = await User.findByEmail(email, application_id);
+      const existingUser = await User.findByEmail(email, applicationDbId);
       if (existingUser) {
         return res.status(409).json({
           error: 'User already exists for this application',
@@ -82,33 +52,26 @@ class UserAuthController {
         });
       }
 
-      // Roles processing
-      const { available_roles, default_user_role } = this.extractRolesFromConfig(application.roles_config);
-      const finalRole = (application.auth_mode === 'advanced' && available_roles.includes(default_user_role)) 
-        ? default_user_role 
-        : 'user';
-
       // Create user
       const user = await User.create({
         email,
         password,
         name: name || email.split('@')[0],
         client_id: clientDbId,
-        application_id,
-        role: finalRole,
+        application_id: applicationDbId,
         email_verified: false
       });
 
       // Verification email
       try {
-        await emailService.sendUserVerificationEmail(email, user.name, user.id, application_id);
+        await emailService.sendUserVerificationEmail(email, user.name, user.id, applicationDbId);
       } catch (emailError) {
         logger.error('Failed to send verification email:', emailError);
       }
 
       // Generate tokens
-      const accessToken = await userJwtService.generateAccessTokenWithFallback(user, client_id, application_id);
-      const refreshToken = await userJwtService.generateRefreshToken(user.id, application_id, req.ip);
+      const accessToken = await userJwtService.generateAccessTokenWithFallback(user, client_id, applicationDbId);
+      const refreshToken = await userJwtService.generateRefreshToken(user.id, applicationDbId, req.ip);
 
       logger.info('User registered successfully', { userId: user.id });
 
@@ -128,11 +91,10 @@ class UserAuthController {
         user: {
           id: user.id,
           email: user.email,
-          name: user.name,
-          role: user.role
+          name: user.name
         },
         application: {
-          id: application_id,
+          id: application.oauth_application_id,
           name: application.name
         }
       });
@@ -157,7 +119,23 @@ class UserAuthController {
         });
       }
 
-      const user = await User.findByEmail(email, application_id);
+      const applicationResult = await database.query(`
+        SELECT ca.id, ca.oauth_application_id
+        FROM client_applications ca
+        JOIN clients c ON ca.client_id = c.id
+        WHERE ca.oauth_application_id = $1 AND c.client_id = $2
+          AND ca.is_active = true AND c.is_active = true
+      `, [application_id, client_id]);
+      const application = applicationResult.rows[0];
+
+      if (!application) {
+        return res.status(401).json({
+          error: 'Invalid credentials or application',
+          code: 'INVALID_CREDENTIALS',
+        });
+      }
+
+      const user = await User.findByEmail(email, application.id);
 
       if (!user) {
         return res.status(401).json({
@@ -176,8 +154,8 @@ class UserAuthController {
 
       await User.update(user.id, { last_login: new Date() });
 
-      const accessToken = await userJwtService.generateAccessTokenWithFallback(user, client_id, application_id);
-      const refreshToken = await userJwtService.generateRefreshToken(user.id, application_id, req.ip);
+      const accessToken = await userJwtService.generateAccessTokenWithFallback(user, client_id, application.id);
+      const refreshToken = await userJwtService.generateRefreshToken(user.id, application.id, req.ip);
 
       logger.info('User login successful', { userId: user.id });
 
@@ -196,8 +174,7 @@ class UserAuthController {
         user: {
           id: user.id,
           email: user.email,
-          name: user.name,
-          role: user.role
+          name: user.name
         }
       });
 
@@ -240,63 +217,6 @@ class UserAuthController {
           code: 'INVALID_REFRESH_TOKEN',
         });
       }
-      next(error);
-    }
-  }
-
-  /**
-   * Update user role for an application
-   */
-  async updateUserRole(req, res, next) {
-    const { user_id, role } = req.body;
-    const applicationId = req.application?.id;
-
-    try {
-      if (!applicationId) {
-        return res.status(401).json({ error: 'Application authentication required', code: 'AUTH_REQUIRED' });
-      }
-
-      if (!user_id || !role) {
-        return res.status(400).json({
-          error: 'user_id and role are required',
-          code: 'MISSING_REQUIRED_FIELDS'
-        });
-      }
-
-      const user = await User.findById(user_id);
-      if (!user) {
-        return res.status(404).json({ error: 'User not found' });
-      }
-
-      if (parseInt(user.application_id) !== parseInt(applicationId)) {
-        return res.status(404).json({ error: 'User not found for this application', code: 'USER_NOT_FOUND' });
-      }
-
-      if (user.role === role) {
-        return res.status(400).json({ error: 'User already has this role', code: 'ROLE_UNCHANGED' });
-      }
-
-      const updatedUser = await User.update(user_id, {
-        role,
-        requested_role: null,
-        role_request_status: 'approved'
-      });
-
-      logger.info('User role updated', { userId: user_id, applicationId, role });
-
-      res.json({
-        success: true,
-        message: 'User role updated successfully',
-        user: {
-          id: updatedUser.id,
-          email: updatedUser.email,
-          role: updatedUser.role,
-          application_id: updatedUser.application_id
-        }
-      });
-
-    } catch (error) {
-      logger.error('User role update error:', error);
       next(error);
     }
   }
@@ -350,7 +270,6 @@ class UserAuthController {
           id: user.id,
           email: user.email,
           name: user.name,
-          role: user.role,
           email_verified: user.email_verified,
           last_login: user.last_login,
           created_at: user.created_at,

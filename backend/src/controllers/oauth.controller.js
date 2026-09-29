@@ -2,6 +2,7 @@ const nodeCrypto = require('crypto');
 const database = require('../utils/database');
 const passwordCrypto = require('../utils/crypto');
 const ApplicationKeyService = require('../services/applicationKey.service');
+const User = require('../models/User');
 
 const DEFAULT_SCOPES = ['openid', 'profile', 'email'];
 const REQUEST_TTL = 10 * 60 * 1000;
@@ -21,10 +22,10 @@ function oauthError(res, error, description, status = 400) {
 class OAuthController {
   async loadClient(clientId) {
     const result = await database.query(`
-      SELECT id, name, oauth_client_id, oauth_client_secret_hash,
-              oauth_redirect_uris, oauth_allowed_scopes, oauth_client_type, oauth_jwt_claims
+      SELECT id, name, redirect_url, oauth_application_id, oauth_application_secret,
+             oauth_allowed_scopes, oauth_jwt_claims
       FROM client_applications
-      WHERE oauth_client_id = $1 AND is_active = true
+      WHERE oauth_application_id = $1 AND is_active = true
     `, [clientId]);
     return result.rows[0] || null;
   }
@@ -32,9 +33,7 @@ class OAuthController {
   normalizeClient(client) {
     return {
       ...client,
-      redirectUris: Array.isArray(client.oauth_redirect_uris)
-        ? client.oauth_redirect_uris
-        : JSON.parse(client.oauth_redirect_uris || '[]'),
+      redirectUris: client.redirect_url ? [client.redirect_url] : [],
       allowedScopes: Array.isArray(client.oauth_allowed_scopes)
         ? client.oauth_allowed_scopes
         : JSON.parse(client.oauth_allowed_scopes || JSON.stringify(DEFAULT_SCOPES))
@@ -77,8 +76,8 @@ class OAuthController {
         expiresAt: Date.now() + REQUEST_TTL
       };
       const frontend = process.env.FRONTEND_URL || 'http://localhost:3000';
-      const page = req.session.authUserId ? 'consent' : 'login';
-      return res.redirect(`${frontend}/oauth/${page}?request_id=${encodeURIComponent(requestId)}`);
+      const page = req.session.authUserId ? '/oauth/consent' : '/auth/login';
+      return res.redirect(`${frontend}${page}?request_id=${encodeURIComponent(requestId)}`);
     } catch (error) {
       return next(error);
     }
@@ -110,6 +109,46 @@ class OAuthController {
       }
       req.session.authUserId = user.id;
       return res.json({ success: true });
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  async signup(req, res, next) {
+    try {
+      const { request_id, email, password, name } = req.body;
+      const request = req.session.oauthRequest;
+      if (!request || request.id !== request_id || request.expiresAt < Date.now()) {
+        return oauthError(res, 'invalid_request', 'Authorization request is missing or expired');
+      }
+      if (!email || !password) {
+        return oauthError(res, 'invalid_request', 'Email and password are required');
+      }
+      if (password.length < 8) {
+        return oauthError(res, 'invalid_request', 'Password must be at least 8 characters long');
+      }
+
+      const applicationResult = await database.query(`
+        SELECT client_id FROM client_applications
+        WHERE id = $1 AND is_active = true
+      `, [request.clientDbId]);
+      const application = applicationResult.rows[0];
+      if (!application) return oauthError(res, 'invalid_request', 'Application is inactive or unavailable');
+
+      const existingUser = await User.findByEmail(email, request.clientDbId);
+      if (existingUser) return oauthError(res, 'account_exists', 'An account with this email already exists', 409);
+
+      const user = await User.create({
+        email,
+        password,
+        name: name || email.split('@')[0],
+        client_id: application.client_id,
+        application_id: request.clientDbId,
+        email_verified: false
+      });
+
+      req.session.authUserId = user.id;
+      return res.status(201).json({ success: true });
     } catch (error) {
       return next(error);
     }
@@ -153,12 +192,8 @@ class OAuthController {
       const client = await this.loadClient(client_id);
       if (!client) return oauthError(res, 'invalid_client', 'Unknown or inactive client', 401);
       const normalized = this.normalizeClient(client);
-      if (normalized.oauth_client_type !== 'public') {
-        const suppliedHash = client_secret ? hash(client_secret) : '';
-        const legacyHash = client_secret ? nodeCrypto.createHash('md5').update(client_secret).digest('hex') : '';
-        const valid = client.oauth_client_secret_hash &&
-          (suppliedHash === client.oauth_client_secret_hash || legacyHash === client.oauth_client_secret_hash);
-        if (!valid) return oauthError(res, 'invalid_client', 'Client authentication failed', 401);
+      if (client_secret !== client.oauth_application_secret) {
+        return oauthError(res, 'invalid_client', 'Client authentication failed', 401);
       }
       if (grant_type === 'refresh_token') return this.refresh(res, client, refresh_token);
       if (grant_type !== 'authorization_code' || !code || !redirect_uri || !code_verifier) {
@@ -183,10 +218,10 @@ class OAuthController {
 
   async issueTokens(res, client, userId, scopesValue, nonce) {
     const scopes = Array.isArray(scopesValue) ? scopesValue : JSON.parse(scopesValue);
-    const userResult = await database.query('SELECT id, email, name, email_verified, role FROM users WHERE id = $1 AND is_active = true', [userId]);
+    const userResult = await database.query('SELECT id, email, name, email_verified FROM users WHERE id = $1 AND is_active = true', [userId]);
     const user = userResult.rows[0];
     if (!user) return oauthError(res, 'invalid_grant', 'User is no longer active');
-    const audience = client.oauth_client_id;
+    const audience = client.oauth_application_id;
     const jwtClaims = client.oauth_jwt_claims && typeof client.oauth_jwt_claims === 'object'
       ? client.oauth_jwt_claims
       : JSON.parse(client.oauth_jwt_claims || '{}');

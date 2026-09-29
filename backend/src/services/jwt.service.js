@@ -8,9 +8,7 @@ class JWTService {
     this.refreshTokenExpiry = 7 * 24 * 60 * 60; // 7 days
   }
 
-  /**
-   * Generate access token using client's specific key
-   */
+
   async generateAccessToken(userId, userType, clientId, additionalClaims = {}) {
     try {
       const payload = {
@@ -37,9 +35,7 @@ class JWTService {
     }
   }
 
-  /**
-   * Generate refresh token (MATCHES YOUR EXACT SCHEMA)
-   */
+
   async generateRefreshToken(userId, clientId, deviceInfo = {}) {
     try {
       const refreshToken = require('crypto').randomBytes(40).toString('hex');

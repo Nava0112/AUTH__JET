@@ -26,22 +26,6 @@ class DashboardController {
         WHERE is_active = true
       `);
 
-      // Get applications by auth mode
-      const authModesResult = await database.query(`
-        SELECT auth_mode, COUNT(*) as count
-        FROM client_applications 
-        WHERE is_active = true
-        GROUP BY auth_mode
-      `);
-
-      // Get recent applications (last 7 days)
-      const recentAppsResult = await database.query(`
-        SELECT COUNT(*) as recent_applications
-        FROM client_applications 
-        WHERE is_active = true 
-        AND created_at >= NOW() - INTERVAL '7 days'
-      `);
-
       // Get recent users (last 7 days)
       const recentUsersResult = await database.query(`
         SELECT COUNT(*) as recent_users
@@ -54,11 +38,8 @@ class DashboardController {
         totalApplications: parseInt(appsResult.rows[0].total_applications),
         totalUsers: parseInt(usersResult.rows[0].total_users),
         totalClients: parseInt(clientsResult.rows[0].total_clients),
-        authModes: authModesResult.rows.reduce((acc, row) => {
-          acc[row.auth_mode] = parseInt(row.count);
-          return acc;
-        }, {}),
-        recentApplications: parseInt(recentAppsResult.rows[0].recent_applications),
+        authModes: {},
+        recentApplications: 0,
         recentUsers: parseInt(recentUsersResult.rows[0].recent_users)
       };
 
@@ -108,14 +89,13 @@ class DashboardController {
         SELECT 
           ca.id,
           ca.name,
-          ca.auth_mode,
-          ca.created_at,
+          ca.redirect_url,
           COUNT(u.id) as user_count
         FROM client_applications ca
         LEFT JOIN users u ON ca.id = u.application_id AND u.is_active = true
         WHERE ca.client_id = $1 AND ca.is_active = true
-        GROUP BY ca.id, ca.name, ca.auth_mode, ca.created_at
-        ORDER BY ca.created_at DESC
+        GROUP BY ca.id, ca.name, ca.redirect_url
+        ORDER BY ca.id DESC
       `, [clientId]);
 
       // Get recent users (last 7 days)
@@ -129,28 +109,15 @@ class DashboardController {
         AND u.created_at >= NOW() - INTERVAL '7 days'
       `, [clientId]);
 
-      // Get auth mode breakdown
-      const authModesResult = await database.query(`
-        SELECT auth_mode, COUNT(*) as count
-        FROM client_applications 
-        WHERE client_id = $1 AND is_active = true
-        GROUP BY auth_mode
-      `, [clientId]);
-
       const stats = {
         clientApplications: parseInt(appsResult.rows[0].client_applications),
         totalUsers: parseInt(usersResult.rows[0].total_users),
         recentUsers: parseInt(recentUsersResult.rows[0].recent_users),
-        authModes: authModesResult.rows.reduce((acc, row) => {
-          acc[row.auth_mode] = parseInt(row.count);
-          return acc;
-        }, {}),
         applications: appsWithUsersResult.rows.map(app => ({
           id: app.id,
           name: app.name,
-          authMode: app.auth_mode,
+          redirectUrl: app.redirect_url,
           userCount: parseInt(app.user_count),
-          createdAt: app.created_at
         }))
       };
 
@@ -185,39 +152,26 @@ class DashboardController {
           ca.id,
           ca.name,
           ca.description,
-          ca.auth_mode,
-          ca.main_page_url,
-          ca.created_at,
+          ca.redirect_url,
           COUNT(u.id) as total_users,
           COUNT(CASE WHEN u.created_at >= NOW() - INTERVAL '7 days' THEN 1 END) as recent_users,
-          COUNT(CASE WHEN u.last_login >= NOW() - INTERVAL '7 days' THEN 1 END) as active_users,
-          ca.roles_config
+          COUNT(CASE WHEN u.last_login >= NOW() - INTERVAL '7 days' THEN 1 END) as active_users
         FROM client_applications ca
         LEFT JOIN users u ON ca.id = u.application_id AND u.is_active = true
         WHERE ca.client_id = $1 AND ca.is_active = true
-        GROUP BY ca.id, ca.name, ca.description, ca.auth_mode, ca.main_page_url, ca.created_at, ca.roles_config
-        ORDER BY ca.created_at DESC
+        GROUP BY ca.id, ca.name, ca.description, ca.redirect_url
+        ORDER BY ca.id DESC
       `, [clientId]);
 
       const applications = result.rows.map(app => {
-        let rolesConfig = [];
-        try {
-          rolesConfig = app.roles_config ? JSON.parse(app.roles_config) : [];
-        } catch (e) {
-          rolesConfig = [];
-        }
-
         return {
           id: app.id,
           name: app.name,
           description: app.description,
-          authMode: app.auth_mode,
-          mainPageUrl: app.main_page_url,
-          createdAt: app.created_at,
+          redirectUrl: app.redirect_url,
           totalUsers: parseInt(app.total_users),
           recentUsers: parseInt(app.recent_users),
-          activeUsers: parseInt(app.active_users),
-          rolesConfig: rolesConfig
+          activeUsers: parseInt(app.active_users)
         };
       });
 

@@ -5,7 +5,7 @@ const logger = require('../utils/logger');
 class User {
   /**
    * Create a new user
-   * @param {Object} userData - { email, password, name, client_id, application_id, role, metadata }
+  * @param {Object} userData - { email, password, name, client_id, application_id, metadata }
    */
   static async create(userData) {
     const {
@@ -14,7 +14,6 @@ class User {
       name,
       client_id,
       application_id,
-      role = 'user',
       metadata = {},
       email_verified = false
     } = userData;
@@ -25,9 +24,9 @@ class User {
       const query = `
         INSERT INTO users (
           email, password_hash, name, client_id, application_id, 
-          role, metadata, email_verified
+          metadata, email_verified
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING *
       `;
 
@@ -37,7 +36,6 @@ class User {
         name,
         client_id,
         application_id,
-        role,
         JSON.stringify(metadata),
         email_verified
       ]);
@@ -74,8 +72,7 @@ class User {
   static async update(id, updates) {
     try {
       const allowedFields = [
-        'email', 'name', 'role', 'requested_role',
-        'role_request_status', 'metadata', 'is_active',
+        'email', 'name', 'metadata', 'is_active',
         'email_verified', 'last_login', 'jwt_refresh_token'
       ];
 
@@ -202,11 +199,6 @@ class User {
           FROM users 
           WHERE application_id = $1 AND email_verified = true
         `,
-        pendingRequests: `
-          SELECT COUNT(*) as count
-          FROM users 
-          WHERE application_id = $1 AND role_request_status = 'pending'
-        `
       };
 
       const stats = {};

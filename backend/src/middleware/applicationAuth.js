@@ -1,38 +1,10 @@
 const database = require('../utils/database');
 const logger = require('../utils/logger');
 
-/**
- * Application Authentication Middleware
- * 
- * Validates that requests come from a legitimate client application.
- * Client apps must provide:
- * - X-Application-ID header (application database ID)
- * - X-Application-Secret header (application secret)
- * 
- * This middleware populates:
- * - req.application - Full application details
- * - req.clientId - Client database ID (integer)
- * 
- * Use this for user registration/login endpoints to ensure only
- * authorized applications can create users.
- */
-/**
- * Application Authentication Middleware
- * 
- * Validates that requests come from a legitimate client application.
- * Supports two modes:
- * 1. Confidential Client (Backend): Requires X-Application-ID + X-Application-Secret
- * 2. Public Client (SPA/Mobile): Requires X-Application-ID + Matching Origin (Secret optional)
- * 
- * This middleware populates:
- * - req.application - Full application details
- * - req.clientId - Client database ID (integer)
- */
 async function authenticateApplication(req, res, next) {
     try {
         const applicationId = req.headers['x-application-id'];
         const applicationSecret = req.headers['x-application-secret'];
-        const origin = req.headers['origin'];
 
         // Validate App ID present
         if (!applicationId) {
@@ -43,8 +15,7 @@ async function authenticateApplication(req, res, next) {
             });
         }
 
-        // Query application
-        // Note: We don't filter by secret in SQL anymore, we check it in logic
+        // Query application by its public OAuth identifier.
         const query = `
       SELECT 
         ca.*,
@@ -54,7 +25,7 @@ async function authenticateApplication(req, res, next) {
         c.is_active as client_is_active
       FROM client_applications ca
       JOIN clients c ON ca.client_id = c.id
-      WHERE ca.id = $1 
+    WHERE ca.oauth_application_id = $1
         AND ca.is_active = true
         AND c.is_active = true
     `;
@@ -71,54 +42,19 @@ async function authenticateApplication(req, res, next) {
 
         const appData = result.rows[0];
 
-        // Check validation method
-        let isAuthenticated = false;
-
-        // Method 1: Secret Validation (for confidential clients / backends)
-        if (applicationSecret) {
-            if (appData.application_secret === applicationSecret) {
-                isAuthenticated = true;
-            } else {
-                return res.status(401).json({
-                    error: 'Invalid application secret',
-                    code: 'INVALID_APP_SECRET',
-                    message: 'The provided application secret is incorrect'
-                });
-            }
-        }
-        // Method 2: Origin Validation (for public clients / SPA)
-        else if (origin) {
-            const allowedOrigins = appData.allowed_origins || [];
-
-            // Allow localhost in development automatically if not explicitly set
-            if (process.env.NODE_ENV === 'development' &&
-                (origin.includes('localhost') || origin.includes('127.0.0.1'))) {
-                isAuthenticated = true;
-                logger.debug('Allowing localhost origin in dev mode', { origin });
-            }
-            else if (allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
-                isAuthenticated = true;
-            } else {
-                return res.status(403).json({
-                    error: 'Origin not allowed',
-                    code: 'ORIGIN_NOT_ALLOWED',
-                    message: `Requests from origin ${origin} are not allowed for this application`
-                });
-            }
-        }
-        // No checks passed
-        else {
+        if (!applicationSecret) {
             return res.status(401).json({
-                error: 'Authentication failed',
-                code: 'AUTH_FAILED',
-                message: 'Either X-Application-Secret or a registered Origin is required'
+                error: 'Missing application credentials',
+                code: 'MISSING_APP_CREDENTIALS',
+                message: 'X-Application-Secret header is required'
             });
         }
 
-        if (!isAuthenticated) {
+        if (appData.oauth_application_secret !== applicationSecret) {
             return res.status(401).json({
-                error: 'Authentication failed',
-                code: 'AUTH_FAILED'
+                error: 'Invalid application secret',
+                code: 'INVALID_APP_SECRET',
+                message: 'The provided application secret is incorrect'
             });
         }
 
@@ -127,12 +63,10 @@ async function authenticateApplication(req, res, next) {
             id: appData.id,
             name: appData.name,
             description: appData.description,
-            auth_mode: appData.auth_mode,
-            main_page_url: appData.main_page_url,
             redirect_url: appData.redirect_url,
-            webhook_url: appData.webhook_url,
-            default_role: appData.default_role,
-            roles_config: appData.roles_config,
+            oauth_application_id: appData.oauth_application_id,
+            oauth_allowed_scopes: appData.oauth_allowed_scopes,
+            oauth_jwt_claims: appData.oauth_jwt_claims,
             client_id: appData.client_db_id, // Database ID
             client_string_id: appData.client_string_id, // Public ID (cli_...)
             client_name: appData.client_name,

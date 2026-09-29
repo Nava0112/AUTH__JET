@@ -56,18 +56,12 @@ CREATE TABLE IF NOT EXISTS client_applications (
     client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     description TEXT,
-    client_secret VARCHAR(255) NOT NULL DEFAULT 'temp_secret',
-    auth_mode VARCHAR(50) DEFAULT 'basic',
-    main_page_url VARCHAR(500) NOT NULL,
     redirect_url VARCHAR(500) NOT NULL,
-    allowed_origins TEXT[],
-    webhook_url VARCHAR(500),
-    role_request_webhook VARCHAR(500),
-    default_role VARCHAR(50) DEFAULT 'user',
     is_active BOOLEAN DEFAULT true,
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW(),
-    roles_config JSONB DEFAULT '[]'::jsonb
+    oauth_application_id VARCHAR(120) NOT NULL UNIQUE,
+    oauth_application_secret VARCHAR(255) NOT NULL,
+    oauth_allowed_scopes JSONB DEFAULT '["openid", "profile", "email"]'::jsonb,
+    oauth_jwt_claims JSONB NOT NULL DEFAULT '[]'::jsonb
 );
 
 -- Users Table
@@ -78,9 +72,6 @@ CREATE TABLE IF NOT EXISTS users (
     email VARCHAR(255) NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
     name VARCHAR(255),
-    role VARCHAR(50) DEFAULT 'user',
-    requested_role VARCHAR(50),
-    role_request_status VARCHAR(50) DEFAULT 'none',
     metadata JSONB DEFAULT '{}'::jsonb,
     is_active BOOLEAN DEFAULT true,
     email_verified BOOLEAN DEFAULT false,
@@ -139,8 +130,6 @@ CREATE INDEX IF NOT EXISTS idx_client_applications_is_active ON client_applicati
 CREATE INDEX IF NOT EXISTS idx_users_client_id ON users(client_id);
 CREATE INDEX IF NOT EXISTS idx_users_application_id ON users(application_id);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
-CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
-CREATE INDEX IF NOT EXISTS idx_users_role_request_status ON users(role_request_status);
 CREATE INDEX IF NOT EXISTS idx_users_is_active ON users(is_active);
 CREATE INDEX IF NOT EXISTS idx_users_client_application_email ON users(client_id, application_id, email);
 
@@ -179,10 +168,6 @@ CREATE TRIGGER update_clients_updated_at
     BEFORE UPDATE ON clients 
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_client_applications_updated_at 
-    BEFORE UPDATE ON client_applications 
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
 CREATE TRIGGER update_users_updated_at 
     BEFORE UPDATE ON users 
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
@@ -218,8 +203,7 @@ SELECT
     ca.name as application_name,
     COUNT(u.id) as total_users,
     COUNT(CASE WHEN u.is_active THEN 1 END) as active_users,
-    COUNT(CASE WHEN u.email_verified THEN 1 END) as verified_users,
-    COUNT(CASE WHEN u.role_request_status = 'pending' THEN 1 END) as pending_role_requests
+    COUNT(CASE WHEN u.email_verified THEN 1 END) as verified_users
 FROM clients c
 LEFT JOIN client_applications ca ON c.id = ca.client_id
 LEFT JOIN users u ON ca.id = u.application_id
