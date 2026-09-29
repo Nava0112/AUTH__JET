@@ -23,7 +23,6 @@ router.post('/applications', clientAuthController.createApplication);
 router.get('/applications/:id', clientAuthController.getApplication);
 router.put('/applications/:id', clientAuthController.updateApplication);
 router.delete('/applications/:id', clientAuthController.deleteApplication);
-router.post('/applications/:id/regenerate-secret', clientAuthController.regenerateApplicationSecret);
 
 // Key management
 router.get('/applications/:id/keys', clientAuthController.getApplicationKeys);

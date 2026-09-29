@@ -1,0 +1,1 @@
+module.exports = require('../migrations/1760000000000_remove-user-role-system');

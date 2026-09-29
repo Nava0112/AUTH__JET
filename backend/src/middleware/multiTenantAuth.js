@@ -187,7 +187,8 @@ const authenticateUser = async (req, res, next) => {
       // Verify user exists and is active
       // In authenticateUser - SQL Injection Risk
       const userQuery = `
-        SELECT u.*, c.name as client_name, ca.name as application_name, ca.auth_type
+         SELECT u.*, c.name as client_name, ca.name as application_name,
+           ca.redirect_url
         FROM users u
         JOIN clients c ON u.client_id = c.id
         JOIN client_applications ca ON u.application_id = ca.id
@@ -226,12 +227,11 @@ const authenticateUser = async (req, res, next) => {
         id: user.id,
         email: user.email,
         name: user.name,
-        roles: user.roles,
         client_id: user.client_id,
         application_id: user.application_id,
         client_name: user.client_name,
         application_name: user.application_name,
-        auth_type: user.auth_type,
+        redirect_url: user.redirect_url,
         userType: 'user'
       };
 
@@ -274,7 +274,7 @@ const authenticateApplication = async (req, res, next) => {
     SELECT ca.*, c.name as client_name, c.is_active as client_active
     FROM client_applications ca
     JOIN clients c ON ca.client_id = c.id
-    WHERE c.client_id = $1 AND ca.is_active = true AND c.is_active = true
+    WHERE ca.oauth_application_id = $1 AND ca.is_active = true AND c.is_active = true
   `;
 
     const appResult = await database.query(appQuery, [clientId]);
@@ -288,11 +288,7 @@ const authenticateApplication = async (req, res, next) => {
 
     const application = appResult.rows[0];
 
-    // Verify client secret
-    const crypto = require('../utils/crypto');
-    const isValidSecret = await crypto.comparePassword(clientSecret, application.client_secret_hash);
-
-    if (!isValidSecret) {
+    if (clientSecret !== application.oauth_application_secret) {
       return res.status(401).json({
         error: 'Invalid application credentials',
         code: 'INVALID_APP_CREDENTIALS',
@@ -305,8 +301,10 @@ const authenticateApplication = async (req, res, next) => {
       name: application.name,
       client_id: application.client_id,
       client_name: application.client_name,
-      auth_type: application.auth_type,
-      settings: application.settings,
+      redirect_url: application.redirect_url,
+      oauth_application_id: application.oauth_application_id,
+      oauth_allowed_scopes: application.oauth_allowed_scopes,
+      oauth_jwt_claims: application.oauth_jwt_claims,
       userType: 'application'
     };
 
@@ -334,9 +332,6 @@ const requireRole = (allowedRoles, userType = 'user') => {
       case 'client':
         user = req.client;
         break;
-      case 'user':
-        user = req.user;
-        break;
       default:
         return res.status(500).json({
           error: 'Invalid user type for role check',
@@ -351,25 +346,12 @@ const requireRole = (allowedRoles, userType = 'user') => {
       });
     }
 
-    // For users, check roles array
-    if (userType === 'user') {
-      const userRoles = user.roles || [];
-      const hasRequiredRole = allowedRoles.some(role => userRoles.includes(role));
-
-      if (!hasRequiredRole) {
-        return res.status(403).json({
-          error: 'Insufficient permissions',
-          code: 'FORBIDDEN',
-        });
-      }
-    } else {
-      // For admin/client, check single role
-      if (!allowedRoles.includes(user.role || 'admin')) {
-        return res.status(403).json({
-          error: 'Insufficient permissions',
-          code: 'FORBIDDEN',
-        });
-      }
+    // Role checks apply only to admin and client accounts.
+    if (!allowedRoles.includes(user.role || 'admin')) {
+      return res.status(403).json({
+        error: 'Insufficient permissions',
+        code: 'FORBIDDEN',
+      });
     }
 
     next();

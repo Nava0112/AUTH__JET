@@ -24,7 +24,6 @@ exports.seed = async function(knex) {
       email: 'john.doe@techcorp.com',
       password_hash: userPasswords[0],
       name: 'John Doe',
-      role: 'admin',
       metadata: JSON.stringify({
         department: 'Engineering',
         position: 'Lead Developer',
@@ -42,7 +41,6 @@ exports.seed = async function(knex) {
       email: 'jane.smith@techcorp.com',
       password_hash: userPasswords[1],
       name: 'Jane Smith',
-      role: 'editor',
       metadata: JSON.stringify({
         department: 'Marketing',
         position: 'Content Manager',
@@ -60,9 +58,6 @@ exports.seed = async function(knex) {
       email: 'bob.wilson@techcorp.com',
       password_hash: userPasswords[2],
       name: 'Bob Wilson',
-      role: 'user',
-      requested_role: 'editor',
-      role_request_status: 'pending',
       metadata: JSON.stringify({
         department: 'Sales',
         position: 'Sales Representative',
@@ -80,7 +75,6 @@ exports.seed = async function(knex) {
       email: 'alice.brown@techcorp.com',
       password_hash: userPasswords[3],
       name: 'Alice Brown',
-      role: 'premium',
       metadata: JSON.stringify({
         department: 'Product',
         position: 'Product Manager',
@@ -98,7 +92,6 @@ exports.seed = async function(knex) {
       email: 'charlie.davis@startupxyz.com',
       password_hash: userPasswords[4],
       name: 'Charlie Davis',
-      role: 'moderator',
       metadata: JSON.stringify({
         department: 'Community',
         position: 'Community Manager',
@@ -116,9 +109,6 @@ exports.seed = async function(knex) {
       email: 'eva.garcia@startupxyz.com',
       password_hash: userPasswords[4],
       name: 'Eva Garcia',
-      role: 'contributor',
-      requested_role: 'moderator',
-      role_request_status: 'approved',
       metadata: JSON.stringify({
         department: 'Content',
         position: 'Content Creator',

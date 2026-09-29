@@ -7,7 +7,6 @@ const router = express.Router();
 // Admin authentication routes (no auth required)
 router.post('/login', adminController.login);
 router.post('/refresh-token', adminController.refreshToken);
-router.post('/register', adminController.register); // Only for initial setup
 
 // Protected admin routes
 router.use(authenticateAdmin);

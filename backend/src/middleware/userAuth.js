@@ -48,7 +48,6 @@ const authenticateUser = async (req, res, next) => {
         id: user.id,
         email: user.email,
         name: user.name,
-        role: user.role,
         client_id: user.client_id,
         application_id: user.application_id,
         client_name: user.client_name,

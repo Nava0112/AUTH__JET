@@ -1,0 +1,1 @@
+module.exports = require('../migrations/1750000000000_simplify-client-applications');

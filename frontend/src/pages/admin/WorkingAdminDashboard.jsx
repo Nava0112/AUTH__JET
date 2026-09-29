@@ -100,7 +100,13 @@ const WorkingAdminDashboard = () => {
 
   const fetchDashboardStats = async () => {
     try {
-      const response = await fetch('http://localhost:8000/api/dashboard/admin/stats');
+      const adminData = JSON.parse(localStorage.getItem('admin') || '{}');
+      const token = localStorage.getItem('authjet_admin_token') || adminData.token;
+      const response = await fetch('http://localhost:8000/api/dashboard/admin/stats', {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
       const data = await response.json();
       
       if (response.ok && data.success) {
@@ -117,12 +123,20 @@ const WorkingAdminDashboard = () => {
 
   const handleLogout = () => {
     localStorage.removeItem('admin');
+    localStorage.removeItem('authjet_admin_token');
+    localStorage.removeItem('authjet_admin_refresh_token');
     navigate('/admin/login');
   };
 
   const testEndpoint = async (endpoint, name) => {
     try {
-      const response = await fetch(`http://localhost:8000/api/admin/${endpoint}`);
+      const adminData = JSON.parse(localStorage.getItem('admin') || '{}');
+      const token = localStorage.getItem('authjet_admin_token') || adminData.token;
+      const response = await fetch(`http://localhost:8000/api/admin/${endpoint}`, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
       const data = await response.json();
       alert(`${name} Response:\n${JSON.stringify(data, null, 2)}`);
     } catch (err) {

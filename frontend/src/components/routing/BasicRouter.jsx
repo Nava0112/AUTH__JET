@@ -90,6 +90,7 @@ const BasicRouter = () => {
 
       {/* AuthJet authorization server pages */}
       <Route path="/oauth/login" element={<OAuthLogin />} />
+      <Route path="/auth/login" element={<OAuthLogin />} />
       <Route path="/oauth/consent" element={<OAuthConsent />} />
 
       {/* Setup and Status Pages */}

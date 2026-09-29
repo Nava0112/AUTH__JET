@@ -170,7 +170,14 @@ class ClientAuthController {
         });
       }
 
-      res.json({ client });
+      const {
+        client_secret,
+        secret_key_hash,
+        password_hash,
+        ...safeClient
+      } = client;
+
+      res.json({ client: safeClient });
 
     } catch (error) {
       logger.error('Get client profile error:', error);
@@ -195,7 +202,9 @@ class ClientAuthController {
 
       const query = `
         SELECT 
-          ca.*,
+            ca.id AS app_id, ca.id, ca.client_id, ca.name, ca.description,
+            ca.redirect_url, ca.is_active, ca.oauth_application_id,
+            ca.oauth_allowed_scopes, ca.oauth_jwt_claims,
           COUNT(DISTINCT u.id) as user_count,
           COUNT(DISTINCT s.id) as active_session_count
         FROM client_applications ca
@@ -203,7 +212,7 @@ class ClientAuthController {
         LEFT JOIN sessions s ON u.id = s.entity_id AND s.session_type = 'user' AND s.expires_at > NOW() AND s.revoked = false
         WHERE ca.client_id = $1
         GROUP BY ca.id
-        ORDER BY ca.created_at DESC
+        ORDER BY ca.id DESC
         LIMIT $2 OFFSET $3
       `;
 
@@ -236,17 +245,20 @@ class ClientAuthController {
 
   async createApplication(req, res, next) {
     const {
-      name, description, auth_mode = 'jwt',
-      allowed_origins = [], redirect_url, redirect_uris,
-      roles_config, default_role, oauth_jwt_claims = []
+      name, description, redirect_url, oauth_allowed_scopes,
+      oauth_jwt_claims = []
     } = req.body;
 
     try {
-      const application_secret = crypto.generateRandomToken(32);
-      const oauth_client_id = `authjet_${crypto.generateRandomToken(16)}`;
-      const oauth_redirect_uris = Array.isArray(redirect_uris) && redirect_uris.length > 0
-        ? redirect_uris
-        : [redirect_url];
+      if (!name || !redirect_url) {
+        return res.status(400).json({
+          error: 'Application name and redirect_url are required',
+          code: 'MISSING_APPLICATION_FIELDS'
+        });
+      }
+
+      const oauth_application_secret = crypto.generateRandomToken(32);
+      const oauth_application_id = `authjet_${crypto.generateRandomToken(16)}`;
       const reservedJwtClaims = new Set(['iss', 'sub', 'aud', 'exp', 'iat', 'nbf', 'jti', 'nonce', 'token_use']);
       const jwtClaims = (Array.isArray(oauth_jwt_claims) ? oauth_jwt_claims : [])
         .filter(claim => claim && typeof claim.key === 'string' && /^[A-Za-z][A-Za-z0-9_]*$/.test(claim.key.trim()))
@@ -258,23 +270,21 @@ class ClientAuthController {
 
       const insertQuery = `
         INSERT INTO client_applications (
-          client_id, name, description, application_secret, auth_mode,
-          allowed_origins, redirect_url, roles_config, default_role, is_active,
-          oauth_client_id, oauth_client_secret_hash, oauth_redirect_uris,
-          oauth_allowed_scopes, oauth_client_type, oauth_jwt_claims
+          client_id, name, description, redirect_url, is_active,
+          oauth_application_id, oauth_application_secret,
+          oauth_allowed_scopes, oauth_jwt_claims
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         RETURNING *
       `;
 
       const result = await database.query(insertQuery, [
-        req.client.id, name, description, application_secret, auth_mode,
-        Array.isArray(allowed_origins) ? JSON.stringify(allowed_origins) : allowed_origins,
-        redirect_url,
-        roles_config ? (typeof roles_config === 'string' ? roles_config : JSON.stringify(roles_config)) : null,
-        default_role || 'user', true,
-        oauth_client_id, crypto.hashToken(application_secret), JSON.stringify(oauth_redirect_uris),
-        JSON.stringify(['openid', 'profile', 'email']), 'confidential', JSON.stringify(jwtClaims)
+        req.client.id, name, description, redirect_url, true,
+        oauth_application_id, oauth_application_secret,
+        JSON.stringify(Array.isArray(oauth_allowed_scopes) && oauth_allowed_scopes.length
+          ? oauth_allowed_scopes
+          : ['openid', 'profile', 'email']),
+        JSON.stringify(jwtClaims)
       ]);
 
       const application = result.rows[0];
@@ -298,10 +308,7 @@ class ClientAuthController {
         message: 'Application created successfully',
         application: {
           ...application,
-          application_secret,
-          client_id: oauth_client_id,
-          client_secret: application_secret,
-          redirect_uris: oauth_redirect_uris
+          oauth_application_secret
         }
       });
 
@@ -311,28 +318,6 @@ class ClientAuthController {
     }
   }
 
-  async regenerateClientSecret(req, res, next) {
-    try {
-      const client = await Client.regenerateClientSecret(req.client.id);
-      if (!client) {
-        return res.status(404).json({
-          error: 'Client not found',
-          code: 'CLIENT_NOT_FOUND'
-        });
-      }
-
-      logger.info('Client secret regenerated', { clientId: req.client.id });
-
-      res.json({
-        success: true,
-        message: 'Client secret regenerated successfully. Please save the new secret.',
-        client_secret: client.client_secret
-      });
-    } catch (error) {
-      logger.error('Regenerate client secret error:', error);
-      next(error);
-    }
-  }
 
   async getApplication(req, res, next) {
     try {
@@ -367,9 +352,8 @@ class ClientAuthController {
       const updates = req.body;
 
       const allowedFields = [
-        'name', 'description', 'allowed_origins', 'redirect_url',
-        'main_page_url', 'webhook_url',
-        'default_role', 'roles_config', 'is_active'
+        'name', 'description', 'redirect_url', 'is_active',
+        'oauth_allowed_scopes', 'oauth_jwt_claims'
       ];
 
       const updateFields = [];
@@ -381,7 +365,7 @@ class ClientAuthController {
           paramCount++;
           updateFields.push(`${field} = $${paramCount}`);
 
-          if (field === 'roles_config') {
+          if (field === 'oauth_allowed_scopes' || field === 'oauth_jwt_claims') {
             updateValues.push(typeof updates[field] === 'string' ? updates[field] : JSON.stringify(updates[field]));
           } else {
             updateValues.push(updates[field]);
@@ -397,9 +381,7 @@ class ClientAuthController {
       }
 
       paramCount++;
-      updateFields.push('updated_at = NOW()');
       updateValues.push(id);
-
       paramCount++;
       updateValues.push(req.client.id);
 
@@ -474,40 +456,6 @@ class ClientAuthController {
 
     } catch (error) {
       logger.error('Delete application error:', error);
-      next(error);
-    }
-  }
-
-  async regenerateApplicationSecret(req, res, next) {
-    try {
-      const { id } = req.params;
-      const newSecret = crypto.generateRandomToken(32);
-
-      const result = await database.query(
-        'UPDATE client_applications SET application_secret = $1, updated_at = NOW() WHERE id = $2 AND client_id = $3 RETURNING id',
-        [newSecret, id, req.client.id]
-      );
-
-      if (result.rows.length === 0) {
-        return res.status(404).json({
-          error: 'Application not found',
-          code: 'APPLICATION_NOT_FOUND',
-        });
-      }
-
-      logger.info('Application secret regenerated', {
-        applicationId: id,
-        clientId: req.client.id
-      });
-
-      res.json({
-        success: true,
-        message: 'Application secret regenerated successfully. Please save the new secret.',
-        application_secret: newSecret
-      });
-
-    } catch (error) {
-      logger.error('Regenerate application secret error:', error);
       next(error);
     }
   }

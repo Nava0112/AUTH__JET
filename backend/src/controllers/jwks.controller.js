@@ -7,21 +7,24 @@ class JwksController {
    * Get JWKS for an application using body credentials
    * POST /.well-known/jwks
    */
-  static async getJwksBySecret(req, res) {
+  static async getJwksByOauthApplicationId(req, res) {
     try {
-      const { application_id, application_secret } = req.body || {};
+      const { oauth_application_id, oauth_application_secret } = req.body || {};
 
-      if (!application_id || !application_secret) {
+      if (!oauth_application_id || !oauth_application_secret) {
         return res.status(400).json({
           error: 'Missing application credentials',
           code: 'MISSING_APP_CREDENTIALS',
-          message: 'application_id and application_secret are required'
+          message: 'oauth_application_id and oauth_application_secret are required'
         });
       }
 
-      logger.info('JWKS request with application credentials', { application_id });
+      logger.info('JWKS request with application credentials', { oauth_application_id });
 
-      const app = await JwksController.validateApplicationWithSecret(application_id, application_secret);
+      const app = await JwksController.validateApplicationWithSecret(
+        oauth_application_id,
+        oauth_application_secret
+      );
 
       if (!app) {
         return res.status(401).json({
@@ -31,14 +34,14 @@ class JwksController {
       }
 
       if (!app.is_active || !app.client_is_active) {
-        logger.warn('JWKS requested for inactive application', { application_id });
+        logger.warn('JWKS requested for inactive application', { oauth_application_id });
         return res.status(404).json({
           error: 'Application is inactive',
           code: 'APPLICATION_INACTIVE'
         });
       }
 
-      const keys = await ApplicationKeyService.getPublicJwk(application_id);
+      const keys = await ApplicationKeyService.getPublicJwk(app.id);
 
       res.set({
         'Cache-Control': 'public, max-age=3600',
@@ -62,10 +65,10 @@ class JwksController {
    */
   static async validateApplicationWithSecret(application_id, application_secret) {
     const appQuery = `
-      SELECT ca.id, ca.name, ca.is_active, ca.application_secret, c.is_active as client_is_active
+      SELECT ca.id, ca.name, ca.is_active, ca.oauth_application_secret, c.is_active as client_is_active
       FROM client_applications ca
       JOIN clients c ON ca.client_id = c.id
-      WHERE ca.id = $1
+      WHERE ca.oauth_application_id = $1
     `;
     const appResult = await database.query(appQuery, [application_id]);
 
@@ -74,7 +77,7 @@ class JwksController {
     }
 
     const app = appResult.rows[0];
-    if (app.application_secret !== application_secret) {
+    if (app.oauth_application_secret !== application_secret) {
       return null;
     }
 
