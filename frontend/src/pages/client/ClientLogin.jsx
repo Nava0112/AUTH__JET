@@ -34,11 +34,11 @@ const ClientLogin = () => {
   };
 
   const handleGoogleLogin = () => {
-    window.location.href = 'http://localhost:8000/api/auth/google';
+    window.location.href = 'http://127.0.0.1:8000/api/auth/google';
   };
 
   const handleGitHubLogin = () => {
-    window.location.href = 'http://localhost:8000/api/auth/github';
+    window.location.href = 'http://127.0.0.1:8000/api/auth/github';
   };
 
   return (

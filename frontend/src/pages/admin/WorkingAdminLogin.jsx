@@ -32,7 +32,7 @@ const WorkingAdminLogin = () => {
       // Call the working backend API
       console.log('Attempting login with:', { email: formData.email, password: '***' });
       
-      const response = await fetch('http://localhost:8000/api/admin/login', {
+      const response = await fetch('http://127.0.0.1:8000/api/admin/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -77,11 +77,11 @@ const WorkingAdminLogin = () => {
   };
 
   const handleGoogleLogin = () => {
-    window.location.href = 'http://localhost:8000/api/auth/google/admin';
+    window.location.href = 'http://127.0.0.1:8000/api/auth/google/admin';
   };
 
   const handleGitHubLogin = () => {
-    window.location.href = 'http://localhost:8000/api/auth/github/admin';
+    window.location.href = 'http://127.0.0.1:8000/api/auth/github/admin';
   };
 
   return (

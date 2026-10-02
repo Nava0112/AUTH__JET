@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+const API_URL = process.env.REACT_APP_API_URL || 'http://127.0.0.1:8000';
 const labels = { openid: 'Verify your AuthJet identity', profile: 'View your profile', email: 'View your email address' };
 
 const OAuthConsent = () => {

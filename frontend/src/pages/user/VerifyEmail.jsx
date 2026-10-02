@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 
 const VerifyEmail = () => {
@@ -6,11 +6,7 @@ const VerifyEmail = () => {
   const [status, setStatus] = useState('verifying');
   const [message, setMessage] = useState('');
 
-  useEffect(() => {
-    verifyEmail();
-  }, []);
-
-  const verifyEmail = async () => {
+  const verifyEmail = useCallback(async () => {
     const token = searchParams.get('token');
     
     if (!token) {
@@ -20,7 +16,7 @@ const VerifyEmail = () => {
     }
 
     try {
-      const response = await fetch('http://localhost:8000/api/user/verify-email', {
+      const response = await fetch('http://127.0.0.1:8000/api/user/verify-email', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -49,7 +45,11 @@ const VerifyEmail = () => {
       setStatus('error');
       setMessage('Network error: ' + error.message);
     }
-  };
+  }, [searchParams]);
+
+  useEffect(() => {
+    verifyEmail();
+  }, [verifyEmail]);
 
   const resendVerification = async () => {
     try {
@@ -60,7 +60,7 @@ const VerifyEmail = () => {
       }
 
       const user = JSON.parse(userData);
-      const response = await fetch('http://localhost:8000/api/user/resend-verification', {
+      const response = await fetch('http://127.0.0.1:8000/api/user/resend-verification', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -27,7 +27,11 @@ class OAuthController {
       FROM client_applications
       WHERE oauth_application_id = $1 AND is_active = true
     `, [clientId]);
-    return result.rows[0] || null;
+    if (result.rows.length == 1) {
+      console.log(`Loaded client: ${result.rows[0].name} (${result.rows[0].oauth_application_id})`);
+      return result.rows[0] || null;
+    }
+    return null;
   }
 
   normalizeClient(client) {
@@ -57,6 +61,7 @@ class OAuthController {
         return oauthError(res, 'invalid_request', 'client_id, redirect_uri, response_type, scope, code_challenge, and code_challenge_method are required');
       }
       const client = await this.loadClient(client_id);
+      console.log(client);
       if (!client) return oauthError(res, 'invalid_client', 'Unknown or inactive client');
       const normalized = this.normalizeClient(client);
       const validationError = this.validateRequest(req.query, normalized);
@@ -75,7 +80,7 @@ class OAuthController {
         codeChallenge: code_challenge,
         expiresAt: Date.now() + REQUEST_TTL
       };
-      const frontend = process.env.FRONTEND_URL || 'http://localhost:3000';
+      const frontend = process.env.FRONTEND_URL || 'http://127.0.0.1:3000';
       const page = req.session.authUserId ? '/oauth/consent' : '/auth/login';
       return res.redirect(`${frontend}${page}?request_id=${encodeURIComponent(requestId)}`);
     } catch (error) {

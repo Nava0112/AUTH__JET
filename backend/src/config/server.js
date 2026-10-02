@@ -20,7 +20,7 @@ class ServerConfig {
     const origins = process.env.ALLOWED_ORIGINS;
     
     if (!origins) {
-      return this.isProduction ? [] : ['http://localhost:3000'];
+      return this.isProduction ? [] : ['http://127.0.0.1:3000'];
     }
 
     return origins.split(',').map(origin => origin.trim());
@@ -164,7 +164,7 @@ class ServerConfig {
   // Get database configuration
   getDatabaseConfig() {
     return {
-      host: process.env.DB_HOST || 'localhost',
+      host: process.env.DB_HOST || '127.0.0.1',
       port: parseInt(process.env.DB_PORT) || 5432,
       database: process.env.DB_NAME || 'authjet',
       user: process.env.DB_USER || 'postgres',

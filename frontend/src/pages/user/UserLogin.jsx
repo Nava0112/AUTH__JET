@@ -23,7 +23,7 @@ const UserLogin = () => {
       }
 
       try {
-        const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+        const apiUrl = process.env.REACT_APP_API_URL || 'http://127.0.0.1:8000';
         const response = await fetch(
           `${apiUrl}/api/user/applications/${applicationId}`
         );
@@ -119,7 +119,7 @@ const UserLogin = () => {
 
     try {
       const endpoint = isLogin ? '/api/user/login' : '/api/user/register';
-      const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+      const apiUrl = process.env.REACT_APP_API_URL || 'http://127.0.0.1:8000';
 
       const response = await fetch(`${apiUrl}${endpoint}`, {
         method: 'POST',
@@ -294,9 +294,9 @@ const UserLogin = () => {
                     Remember me
                   </label>
                 </div>
-                <a href="#" className="text-sm text-indigo-600 hover:text-indigo-500 transition-colors">
+                <button type="button" className="text-sm text-indigo-600 hover:text-indigo-500 transition-colors">
                   Forgot password?
-                </a>
+                </button>
               </div>
             )}
 

@@ -21,7 +21,7 @@ class OAuthService {
       passport.use('google-client', new GoogleStrategy({
         clientID: process.env.GOOGLE_CLIENT_ID,
         clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-        callbackURL: `${process.env.BACKEND_URL || 'http://localhost:8000'}/api/auth/google/callback`,
+        callbackURL: `${process.env.BACKEND_URL || 'http://127.0.0.1:8000'}/api/auth/google/callback`,
         scope: ['profile', 'email']
       }, async (accessToken, refreshToken, profile, done) => {
         try {
@@ -36,7 +36,7 @@ class OAuthService {
       passport.use('google-admin', new GoogleStrategy({
         clientID: process.env.GOOGLE_CLIENT_ID,
         clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-        callbackURL: `${process.env.BACKEND_URL || 'http://localhost:8000'}/api/auth/google/admin/callback`,
+        callbackURL: `${process.env.BACKEND_URL || 'http://127.0.0.1:8000'}/api/auth/google/admin/callback`,
         scope: ['profile', 'email']
       }, async (accessToken, refreshToken, profile, done) => {
         try {
@@ -55,7 +55,7 @@ class OAuthService {
       passport.use('github-client', new GitHubStrategy({
         clientID: process.env.GITHUB_CLIENT_ID,
         clientSecret: process.env.GITHUB_CLIENT_SECRET,
-        callbackURL: `${process.env.BACKEND_URL || 'http://localhost:8000'}/api/auth/github/callback`,
+        callbackURL: `${process.env.BACKEND_URL || 'http://127.0.0.1:8000'}/api/auth/github/callback`,
         scope: ['user:email']
       }, async (accessToken, refreshToken, profile, done) => {
         try {
@@ -70,7 +70,7 @@ class OAuthService {
       passport.use('github-admin', new GitHubStrategy({
         clientID: process.env.GITHUB_CLIENT_ID,
         clientSecret: process.env.GITHUB_CLIENT_SECRET,
-        callbackURL: `${process.env.BACKEND_URL || 'http://localhost:8000'}/api/auth/github/admin/callback`,
+        callbackURL: `${process.env.BACKEND_URL || 'http://127.0.0.1:8000'}/api/auth/github/admin/callback`,
         scope: ['user:email']
       }, async (accessToken, refreshToken, profile, done) => {
         try {

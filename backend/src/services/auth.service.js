@@ -657,12 +657,12 @@ class AuthService {
           DEFAULT_CLIENT_ID,
           'AuthJet Development Client',
           'dev@authjet.local',
-          'http://localhost:3000',
+          'http://127.0.0.1:3000',
           'development',
           apiKey,
           secretKeyHash,
-          JSON.stringify(['localhost', '127.0.0.1']),
-          JSON.stringify(['http://localhost:3000/oauth/callback']),
+          JSON.stringify(['127.0.0.1', '127.0.0.1']),
+          JSON.stringify(['http://127.0.0.1:3000/oauth/callback']),
           JSON.stringify(['user']),
           'free'
         ]);

@@ -102,7 +102,7 @@ const WorkingAdminDashboard = () => {
     try {
       const adminData = JSON.parse(localStorage.getItem('admin') || '{}');
       const token = localStorage.getItem('authjet_admin_token') || adminData.token;
-      const response = await fetch('http://localhost:8000/api/dashboard/admin/stats', {
+      const response = await fetch('http://127.0.0.1:8000/api/dashboard/admin/stats', {
         headers: {
           Authorization: `Bearer ${token}`
         }
@@ -132,7 +132,7 @@ const WorkingAdminDashboard = () => {
     try {
       const adminData = JSON.parse(localStorage.getItem('admin') || '{}');
       const token = localStorage.getItem('authjet_admin_token') || adminData.token;
-      const response = await fetch(`http://localhost:8000/api/admin/${endpoint}`, {
+      const response = await fetch(`http://127.0.0.1:8000/api/admin/${endpoint}`, {
         headers: {
           Authorization: `Bearer ${token}`
         }
@@ -353,7 +353,7 @@ const WorkingAdminDashboard = () => {
                 <h4 className="text-sm font-medium text-gray-500 mb-2">Backend Status</h4>
                 <div className="flex items-center">
                   <div className="h-2 w-2 bg-green-400 rounded-full mr-2"></div>
-                  <span className="text-sm text-gray-900">Connected to http://localhost:8000</span>
+                  <span className="text-sm text-gray-900">Connected to http://127.0.0.1:8000</span>
                 </div>
               </div>
               <div>

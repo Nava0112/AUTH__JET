@@ -17,7 +17,6 @@ const oauthService = require('./services/oauth.service');
 // New multi-tenant routes
 const adminRoutes = require('./routes/admin.routes');
 const clientAuthRoutes = require('./routes/clientAuth.routes');
-const userAuthRoutes = require('./routes/userAuth.routes');
 const jwksRoutes = require('./routes/jwks.routes');
 const socialAuthRoutes = require('./routes/socialAuth.routes');
 const dashboardRoutes = require('./routes/dashboard.routes');
@@ -70,11 +69,11 @@ class AuthJetApp {
       origin: (origin, callback) => {
         // Default allowed origins
         const defaultOrigins = [
-          'http://localhost:3000',
-          'http://localhost:3001',
-          'http://localhost:8000',
-          'http://localhost:5173', // Vite/React dev server
-          'https://localhost:5173', // HTTPS for local development
+          'http://127.0.0.1:3000',
+          'http://127.0.0.1:3001',
+          'http://127.0.0.1:8000',
+          'http://127.0.0.1:5173', // Vite/React dev server
+          'https://127.0.0.1:5173', // HTTPS for local development
           'http://127.0.0.1:3000',
           'http://127.0.0.1:3001',
           'http://127.0.0.1:8000',
@@ -86,10 +85,10 @@ class AuthJetApp {
         const envOrigins = process.env.ALLOWED_ORIGINS?.split(',').map(o => o.trim()).filter(o => o) || [];
         const allowedOrigins = [...new Set([...defaultOrigins, ...envOrigins])];
 
-        // Development mode: allow all localhost and common dev origins
+        // Development mode: allow all 127.0.0.1 and common dev origins
         if (process.env.NODE_ENV === 'development') {
           const isDevelopmentOrigin = !origin ||
-            origin.includes('localhost') ||
+            origin.includes('127.0.0.1') ||
             origin.includes('127.0.0.1') ||
             origin.includes('192.168.') || // Local network
             origin.includes('10.0.') ||    // Local network
@@ -189,7 +188,6 @@ class AuthJetApp {
     this.app.use('/api/auth', authLimiter);
     this.app.use('/api/auth/login', strictAuthLimiter);
     this.app.use('/api/auth/register', strictAuthLimiter);
-    this.app.use('/api/user/login', strictAuthLimiter);
 
     // Body parsing
     this.app.use(express.json({
@@ -334,9 +332,6 @@ class AuthJetApp {
     // Client Routes (Organizations/Tenants)
     this.app.use('/api/client', clientAuthRoutes); // Includes auth, profile, apps, keys, webhooks
 
-    // User Routes (End Users of Applications)
-    this.app.use('/api/user', userAuthRoutes); // Includes registration, login, profile
-
     // 4. SHARED/UTILITY ROUTES
     this.app.use('/api/dashboard', dashboardRoutes); // Shared dashboard data
     this.app.use('/api/analytics', analyticsRoutes); // Analytics
@@ -351,7 +346,6 @@ class AuthJetApp {
         endpoints: {
           admin: '/api/admin',
           client: '/api/client',
-          user: '/api/user',
           social: '/api/auth/social',
           jwks: 'POST /.well-known/jwks'
         }
@@ -386,11 +380,11 @@ class AuthJetApp {
         logger.info(`CORS enabled for origins: ${process.env.ALLOWED_ORIGINS || 'default development origins'}`);
 
         if (process.env.NODE_ENV === 'development') {
-          logger.info('Development mode: CORS is permissive for localhost origins');
+          logger.info('Development mode: CORS is permissive for 127.0.0.1 origins');
           logger.info('Available endpoints:');
-          logger.info('  Health: http://localhost:' + PORT + '/health');
-          logger.info('  API Info: http://localhost:' + PORT + '/api');
-          logger.info('  JWKS secret POST: http://localhost:' + PORT + '/.well-known/jwks');
+          logger.info('  Health: http://127.0.0.1:' + PORT + '/health');
+          logger.info('  API Info: http://127.0.0.1:' + PORT + '/api');
+          logger.info('  JWKS secret POST: http://127.0.0.1:' + PORT + '/.well-known/jwks');
         }
       });
 

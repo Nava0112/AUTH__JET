@@ -4,12 +4,13 @@ const database = require('../utils/database');
 
 class JwksController {
   /**
-   * Get JWKS for an application using body credentials
-   * POST /.well-known/jwks
+  * Get JWKS for an application using body or query-string credentials
+  * POST or GET /.well-known/jwks
    */
   static async getJwksByOauthApplicationId(req, res) {
     try {
-      const { oauth_application_id, oauth_application_secret } = req.body || {};
+    const credentials = { ...req.query, ...(req.body || {}) };
+    const { oauth_application_id, oauth_application_secret } = credentials;
 
       if (!oauth_application_id || !oauth_application_secret) {
         return res.status(400).json({

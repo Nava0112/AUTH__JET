@@ -14,7 +14,7 @@ const RoleSelector = ({ userId, clientId, applicationId, currentRole, availableR
     try {
       const token = localStorage.getItem('userAccessToken');
       const response = await fetch(
-        `http://localhost:8000/api/user/${userId}/role-requests?client_id=${clientId}&application_id=${applicationId}`,
+        `http://127.0.0.1:8000/api/user/${userId}/role-requests?client_id=${clientId}&application_id=${applicationId}`,
         {
           headers: {
             'Authorization': `Bearer ${token}`
@@ -43,7 +43,7 @@ const RoleSelector = ({ userId, clientId, applicationId, currentRole, availableR
     try {
       const token = localStorage.getItem('userAccessToken');
       const response = await fetch(
-        `http://localhost:8000/api/user/${userId}/request-role?client_id=${clientId}&application_id=${applicationId}`,
+        `http://127.0.0.1:8000/api/user/${userId}/request-role?client_id=${clientId}&application_id=${applicationId}`,
         {
           method: 'POST',
           headers: {
