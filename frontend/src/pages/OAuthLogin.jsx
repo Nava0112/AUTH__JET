@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+const API_URL = process.env.REACT_APP_API_URL || 'http://127.0.0.1:8000';
 
 const OAuthLogin = () => {
   const [params] = useSearchParams();
@@ -182,8 +182,8 @@ const OAuthLogin = () => {
         {/* Footer */}
         <p className="mt-6 text-center text-xs text-slate-400">
           Protected by AuthJet. By continuing, you agree to our{' '}
-          <a href="#" className="underline underline-offset-2 hover:text-slate-500">Terms</a> and{' '}
-          <a href="#" className="underline underline-offset-2 hover:text-slate-500">Privacy Policy</a>.
+          <button type="button" className="underline underline-offset-2 hover:text-slate-500">Terms</button> and{' '}
+          <button type="button" className="underline underline-offset-2 hover:text-slate-500">Privacy Policy</button>.
         </p>
       </div>
     </main>

@@ -22,7 +22,7 @@ const WorkingClientDashboard = () => {
     setJwksLoading(true);
     try {
       const token = localStorage.getItem('clientToken');
-      const response = await fetch(`http://localhost:8000/api/client/applications/${app.id}/jwks`, {
+      const response = await fetch(`http://127.0.0.1:8000/api/client/applications/${app.id}/jwks`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await response.json();
@@ -59,8 +59,8 @@ const WorkingClientDashboard = () => {
       };
 
       const [statsResponse, appsResponse] = await Promise.all([
-        fetch('http://localhost:8000/api/client/dashboard/stats', { headers }),
-        fetch('http://localhost:8000/api/client/applications', { headers })
+        fetch('http://127.0.0.1:8000/api/client/dashboard/stats', { headers }),
+        fetch('http://127.0.0.1:8000/api/client/applications', { headers })
       ]);
 
       const statsData = await statsResponse.json();
@@ -116,7 +116,7 @@ const WorkingClientDashboard = () => {
         return;
       }
 
-      const response = await fetch(`http://localhost:8000/api/client/${endpoint}`, {
+      const response = await fetch(`http://127.0.0.1:8000/api/client/${endpoint}`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }

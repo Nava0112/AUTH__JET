@@ -106,7 +106,7 @@ router.post('/oauth/exchange', async (req, res) => {
     }
     
     // Determine redirect URI based on userType and provider
-    const baseUrl = process.env.BACKEND_URL || 'http://localhost:8000';
+    const baseUrl = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
     const redirectUri = userType === 'admin' 
       ? `${baseUrl}/api/auth/${provider}/admin/callback`
       : `${baseUrl}/api/auth/${provider}/callback`;

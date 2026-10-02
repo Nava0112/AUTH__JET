@@ -4,7 +4,7 @@ require('dotenv').config();
 const getConfig = () => ({
   client: 'postgresql',
   connection: {
-    host: process.env.DB_HOST || 'localhost',
+    host: process.env.DB_HOST || '127.0.0.1',
     port: parseInt(process.env.DB_PORT) || 5432,
     database: process.env.DB_NAME || 'auth_system',
     user: process.env.DB_USER || 'postgres',
